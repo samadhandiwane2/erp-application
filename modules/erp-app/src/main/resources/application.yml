@@ -1,0 +1,125 @@
+spring:
+    application:
+        name: erp-application
+
+    datasource:
+        url: jdbc:mysql://localhost:3306/erp_master?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&allowMultiQueries=true
+        username: root
+        password: root
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        hikari:
+            auto-commit: false  # CRITICAL: Disable autocommit
+            maximum-pool-size: 20
+            minimum-idle: 5
+            connection-timeout: 30000
+            idle-timeout: 600000
+            max-lifetime: 1800000
+
+    aop:
+        auto: true
+        proxy-target-class: true
+
+    flyway:
+        enabled: false # Disable default flyway auto configuration
+
+    mail:
+        host: localhost
+        port: 1025
+        username: # leave empty for MailHog
+        password: # leave empty for MailHog
+        properties:
+            mail:
+                smtp:
+                    auth: false
+                    starttls:
+                        enable: false
+                debug: false
+
+    jpa:
+        hibernate:
+            ddl-auto: none # Let Flyway handle schema management
+        show-sql: false # Set to true only for debugging
+        properties:
+            hibernate:
+                dialect: org.hibernate.dialect.MySQLDialect
+                show-sql: false
+                format_sql: true
+                # CRITICAL: Disable autocommit for proper transaction management
+                connection:
+                    provider_disables_autocommit: true
+                    autocommit: false
+                jdbc:
+                    batch_size: 25
+                order_inserts: true
+                order_updates: true
+        open-in-view: false  # Disable open-in-view for better performance
+
+server:
+    port: 8080
+    servlet:
+        context-path: /
+    compression:
+        enabled: true
+    error:
+        include-stacktrace: never
+        include-message: always
+
+logging:
+    level:
+        # Application logging
+        com.erp: INFO
+        com.erp.common.aspect.SchemaRoutingAspect: DEBUG
+        com.erp.common.config.TenantRoutingDataSource: DEBUG
+        com.erp.common.config.MultiTenantDataSourceConfig.TenantRoutingDataSource: DEBUG
+        com.erp.common.service.DatabaseInitializationService: INFO
+        com.erp.common.service.FlywayMigrationService: INFO
+        com.erp.common.context.TenantContext: DEBUG
+
+        # Framework logging
+        org.springframework.security: WARN
+        org.springframework.jdbc: WARN
+        org.springframework.transaction: DEBUG
+        org.springframework.boot.autoconfigure.mail: INFO
+        org.springframework.mail: INFO
+        org.springframework.aop: WARN
+        org.flywaydb: INFO
+        org.hibernate.SQL: WARN
+        org.hibernate.type.descriptor.sql.BasicBinder: WARN
+        com.zaxxer.hikari: WARN
+
+        # Root level
+        root: INFO
+
+    pattern:
+        console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+        file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+app:
+    jwt:
+        secret: ${JWT_SECRET:mySecretKey12345678901234567890123456789012345678901234567890}
+        access-token-validity: 1800000  # 30 minutes
+        refresh-token-validity: 86400000  # 24 hours
+
+    database:
+        master-schema: erp_master
+        tenant-schema-prefix: tenant_
+        auto-migrate-on-startup: true  # KEEP FALSE initially for debugging
+
+    email:
+        from-address: "noreply@erp-app.com"
+        from-name: "ERP System"
+        reset-code-expiry-minutes: 30
+        max-reset-attempts-per-hour: 3
+        verification-token-expiry-hours: 24
+        max-change-requests-per-day: 3
+
+management:
+    endpoints:
+        web:
+            exposure:
+                include: health,info,metrics
+    endpoint:
+        health:
+            show-details: when-authorized
+        info:
+            enabled: true
