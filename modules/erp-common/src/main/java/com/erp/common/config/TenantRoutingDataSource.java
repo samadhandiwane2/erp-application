@@ -1,7 +1,5 @@
 package com.erp.common.config;
 
-import com.erp.common.annotation.ForceMasterSchema;
-import com.erp.common.annotation.ForceTenantSchema;
 import com.erp.common.context.SchemaContext;
 import com.erp.common.context.TenantContext;
 import lombok.extern.slf4j.Slf4j;
@@ -13,152 +11,57 @@ public class TenantRoutingDataSource extends AbstractRoutingDataSource {
     @Override
     protected Object determineCurrentLookupKey() {
         try {
-            // 1. First check if SchemaContext has forced schema (from aspects)
-            if (SchemaContext.hasForcedSchema()) {
-                String forcedSchema = SchemaContext.getCurrentSchema();
-                log.debug("SchemaContext has forced schema: {}", forcedSchema);
+            String schemaContext = SchemaContext.getCurrentSchema();
+            String tenantCode = TenantContext.getCurrentTenant();
 
-                if ("master".equals(forcedSchema)) {
-                    log.debug("Using MASTER schema (forced by context)");
+            log.debug("Routing decision - SchemaContext: {}, TenantCode: {}",
+                    schemaContext, tenantCode);
+
+            // Priority 1: Explicit schema context (set by interceptor/aspects)
+            if (schemaContext != null) {
+                if ("master".equals(schemaContext)) {
+                    log.debug("â†' Routing to: master (explicit)");
                     return "master";
                 }
 
-                if ("tenant".equals(forcedSchema)) {
-                    String tenantCode = TenantContext.getCurrentTenant();
+                if ("tenant".equals(schemaContext)) {
                     if (tenantCode != null) {
                         String key = "tenant_" + tenantCode.toLowerCase();
-                        log.debug("Using TENANT schema (forced): {}", key);
+                        log.debug("â†' Routing to: {} (explicit tenant)", key);
                         return key;
+                    } else {
+                        log.warn("Tenant schema requested but no tenant context! Falling back to master");
+                        return "master";
                     }
-                    log.warn("Forced to tenant but no tenant context, using master");
-                    return "master";
                 }
 
-                return forcedSchema;
+                // Direct schema name provided
+                log.debug("â†' Routing to: {} (direct schema)", schemaContext);
+                return schemaContext;
             }
 
-            // 2. Check if we're being called from a class/method with @ForceMasterSchema
-            if (isCalledFromMasterSchemaContext()) {
-                log.debug("Detected @ForceMasterSchema in call stack, using MASTER");
-                return "master";
-            }
-
-            // 3. Check if we're being called from a class/method with @ForceTenantSchema
-            if (isCalledFromTenantSchemaContext()) {
-                String tenantCode = TenantContext.getCurrentTenant();
-                if (tenantCode != null) {
-                    String key = "tenant_" + tenantCode.toLowerCase();
-                    log.debug("Detected @ForceTenantSchema in call stack, using: {}", key);
-                    return key;
-                }
-            }
-
-            // 4. Check tenant context from JWT
-            String tenantCode = TenantContext.getCurrentTenant();
+            // Priority 2: Tenant context (from JWT, but no explicit schema set)
             if (tenantCode != null) {
                 String key = "tenant_" + tenantCode.toLowerCase();
-                log.debug("Using tenant schema from context: {}", key);
+                log.debug("â†' Routing to: {} (from tenant context)", key);
                 return key;
             }
 
-            // 5. Default to master
-            log.debug("No context found, defaulting to master");
+            // Priority 3: Default to master
+            log.debug("â†' Routing to: master (default)");
             return "master";
 
         } catch (Exception e) {
-            log.error("Error determining datasource key, defaulting to master", e);
+            log.error("Error determining datasource routing key", e);
+            log.warn("â†' Routing to: master (error fallback)");
             return "master";
         }
     }
 
-    private boolean isCalledFromMasterSchemaContext() {
-        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-
-        for (StackTraceElement element : stackTrace) {
-            try {
-                String className = element.getClassName();
-
-                // Skip framework classes
-                if (className.startsWith("java.") ||
-                        className.startsWith("org.springframework.") ||
-                        className.startsWith("com.sun.") ||
-                        className.startsWith("org.hibernate.") ||
-                        className.startsWith("org.aspectj.")) {
-                    continue;
-                }
-
-                // Check known master schema classes
-                if (className.contains("UserRepository") ||
-                        className.contains("UserSettingsService") ||
-                        className.contains("TenantRepository") ||
-                        className.contains("CustomUserDetailsService") ||
-                        className.contains("AuthenticationService") ||
-                        className.contains("TenantManagementService")) {
-                    log.trace("Found master schema class in stack: {}", className);
-                    return true;
-                }
-
-                // Try to check for annotation (this might not always work due to proxies)
-                try {
-                    Class<?> clazz = Class.forName(className);
-                    if (clazz.isAnnotationPresent(ForceMasterSchema.class)) {
-                        log.trace("Found @ForceMasterSchema on class: {}", className);
-                        return true;
-                    }
-                } catch (Exception e) {
-                    // Class not found or not accessible, continue
-                }
-
-            } catch (Exception e) {
-                // Continue checking other stack elements
-            }
-        }
-
-        return false;
-    }
-
-    private boolean isCalledFromTenantSchemaContext() {
-        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-
-        for (StackTraceElement element : stackTrace) {
-            try {
-                String className = element.getClassName();
-
-                // Skip framework classes
-                if (className.startsWith("java.") ||
-                        className.startsWith("org.springframework.") ||
-                        className.startsWith("com.sun.") ||
-                        className.startsWith("org.hibernate.") ||
-                        className.startsWith("org.aspectj.")) {
-                    continue;
-                }
-
-                // Check known tenant schema classes
-                if (className.contains("SectionService") ||
-                        className.contains("AcademicYearService") ||
-                        className.contains("SectionController") ||
-                        className.contains("StudentService") ||
-                        className.contains("ClassService")) {
-                    log.trace("Found tenant schema class in stack: {}", className);
-                    return true;
-                }
-
-                // Try to check for annotation
-                try {
-                    Class<?> clazz = Class.forName(className);
-                    if (clazz.isAnnotationPresent(ForceTenantSchema.class)) {
-                        log.trace("Found @ForceTenantSchema on class: {}", className);
-                        return true;
-                    }
-                } catch (Exception e) {
-                    // Class not found or not accessible, continue
-                }
-
-            } catch (Exception e) {
-                // Continue checking other stack elements
-            }
-        }
-
-        return false;
+    @Override
+    protected Object resolveSpecifiedLookupKey(Object lookupKey) {
+        String key = (String) lookupKey;
+        log.trace("Resolving datasource for key: {}", key);
+        return super.resolveSpecifiedLookupKey(lookupKey);
     }
 }

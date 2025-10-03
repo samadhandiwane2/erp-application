@@ -32,16 +32,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
-        // CRITICAL: Clear ALL contexts at the beginning of EVERY request
-        // This prevents context leakage between requests
-        TenantContext.clear();
-        SchemaContext.clear();
-        SecurityContextHolder.clearContext();
+        // Clear contexts at the start of each request
+        clearAllContexts();
 
-        log.debug("=== Starting new request: {} ===", request.getRequestURI());
-        log.debug("Cleared all contexts at request start");
+        String requestURI = request.getRequestURI();
+        log.debug("=== Processing request: {} {} ===", request.getMethod(), requestURI);
 
         try {
+            // Extract and validate JWT
             String jwt = getJwtFromRequest(request);
 
             if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
@@ -50,29 +48,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Long tenantId = tokenProvider.getTenantIdFromToken(jwt);
                 String tenantCode = tokenProvider.getTenantCodeFromToken(jwt);
 
-                log.info("JWT Token Info - User: {}, TenantID: {}, TenantCode: {}",
+                log.debug("JWT validated - User: {}, TenantID: {}, TenantCode: {}",
                         username, tenantId, tenantCode);
 
-                // IMPORTANT: Set tenant context for tenant users
+                // Set tenant context if user belongs to a tenant
                 if (tenantCode != null && tenantId != null) {
-                    // This is a tenant user - set ONLY TenantContext
-                    // DO NOT set SchemaContext here - let aspects handle it
                     TenantContext.setCurrentTenant(tenantId, tenantCode, null);
-                    log.info("Set TenantContext for tenant user - ID: {}, Code: {}",
-                            tenantId, tenantCode);
-
-                    // Verify context is set
-                    log.info("Verification - TenantContext.getCurrentTenant(): {}",
-                            TenantContext.getCurrentTenant());
+                    log.debug("Set TenantContext - ID: {}, Code: {}", tenantId, tenantCode);
                 } else {
-                    // This is a super admin user (no tenant)
-                    log.info("Super admin user: {} (no tenant context set)", username);
-                    // Don't set any context for super admin
+                    log.debug("Super admin user (no tenant context)");
                 }
 
-                // DO NOT set SchemaContext here - it should only be set by aspects
-                // Verify SchemaContext is clear
-                log.info("SchemaContext should be null: {}", SchemaContext.getCurrentSchema());
+                // DO NOT set SchemaContext here - let interceptor handle it based on endpoint
 
                 // Load user details and set security context
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
@@ -80,49 +67,40 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (userDetails != null) {
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(
-                                    userDetails,
-                                    null,
-                                    userDetails.getAuthorities()
-                            );
+                                    userDetails, null, userDetails.getAuthorities());
                     authentication.setDetails(
-                            new WebAuthenticationDetailsSource().buildDetails(request)
-                    );
+                            new WebAuthenticationDetailsSource().buildDetails(request));
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
-                    log.debug("Set authentication for user: {}", username);
+                    log.debug("Authentication set for user: {}", username);
                 }
-            } else {
-                log.debug("No valid JWT token found for request: {}", request.getRequestURI());
             }
         } catch (Exception ex) {
-            log.error("Error setting user authentication: ", ex);
-            // Don't rethrow - let request continue without authentication
+            log.error("Error during JWT authentication", ex);
+            // Don't block the request - let it continue without authentication
         }
 
         try {
-            // Process the request
+            // Continue with the request
             filterChain.doFilter(request, response);
         } finally {
-            // CRITICAL: Always clear all contexts after request
-            log.debug("=== Ending request: {} ===", request.getRequestURI());
-            log.debug("Clearing all contexts after request");
-
-            TenantContext.clear();
-            SchemaContext.clear();
-            SecurityContextHolder.clearContext();
-
-            log.debug("All contexts cleared successfully");
+            // Clear contexts after request completes
+            clearAllContexts();
+            log.debug("=== Request completed, contexts cleared ===");
         }
+    }
+
+    private void clearAllContexts() {
+        TenantContext.clear();
+        SchemaContext.clear();
+        SecurityContextHolder.clearContext();
     }
 
     private String getJwtFromRequest(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
-            String token = bearerToken.substring(7);
-            log.debug("Extracted JWT token from Authorization header");
-            return token;
+            return bearerToken.substring(7);
         }
-        log.debug("No Bearer token found in Authorization header");
         return null;
     }
 

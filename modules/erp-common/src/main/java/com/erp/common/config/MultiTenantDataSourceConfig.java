@@ -3,6 +3,7 @@ package com.erp.common.config;
 import com.erp.common.entity.Tenant;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +19,7 @@ import java.util.List;
 @Slf4j
 public class MultiTenantDataSourceConfig {
 
+    @Getter
     private final Map<Object, Object> dataSources = new ConcurrentHashMap<>();
 
     @Value("${spring.datasource.url}")
