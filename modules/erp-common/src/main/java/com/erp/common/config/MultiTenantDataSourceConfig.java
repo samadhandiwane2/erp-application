@@ -151,8 +151,8 @@ public class MultiTenantDataSourceConfig {
         config.setDriverClassName("com.mysql.cj.jdbc.Driver");
 
         // Connection pool settings
-        config.setMaximumPoolSize(10);
-        config.setMinimumIdle(2);
+        config.setMaximumPoolSize(5);
+        config.setMinimumIdle(1);
         config.setConnectionTimeout(30000);
         config.setIdleTimeout(600000);
         config.setMaxLifetime(1800000);

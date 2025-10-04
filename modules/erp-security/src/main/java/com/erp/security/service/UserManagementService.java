@@ -204,7 +204,7 @@ public class UserManagementService {
                 request.getEmail(),
                 request.getFirstName(),
                 request.getLastName(),
-                request.getUserType(),
+                String.valueOf(request.getUserType()),
                 request.getTenantId(),
                 request.getIsActive(),
                 pageable

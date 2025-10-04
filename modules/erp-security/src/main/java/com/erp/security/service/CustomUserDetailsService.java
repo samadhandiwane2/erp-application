@@ -17,15 +17,14 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-// REMOVED @ForceMasterSchema from class level - will use at method level instead
 public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserRepository userRepository;
     private final TenantRepository tenantRepository;
 
     @Override
-    @Transactional(readOnly = true)
-    @ForceMasterSchema  // Only force master schema for this specific method
+    // @Transactional(readOnly = true)  // REMOVED
+    @ForceMasterSchema
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         log.debug("Loading user by username: {}", username);
 
@@ -37,7 +36,6 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         String tenantCode = null;
         if (user.getTenantId() != null) {
-            // This will also query master schema since we're in @ForceMasterSchema method
             Tenant tenant = tenantRepository.findById(user.getTenantId())
                     .orElse(null);
             if (tenant != null) {
@@ -50,8 +48,8 @@ public class CustomUserDetailsService implements UserDetailsService {
         return UserPrincipal.create(user, tenantCode);
     }
 
-    @Transactional(readOnly = true)
-    @ForceMasterSchema  // Only force master schema for this specific method
+    // @Transactional(readOnly = true)  // REMOVED
+    @ForceMasterSchema
     public UserDetails loadUserByUsernameAndTenant(String username, String tenantCode)
             throws UsernameNotFoundException {
 
@@ -61,7 +59,7 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         if (tenantCode == null) {
             // Super admin login
-            user = userRepository.findByUsernameAndUserTypeAndIsActiveTrue(username, User.UserType.SUPER_ADMIN)
+            user = userRepository.findByUsernameAndUserTypeAndIsActiveTrue(username, User.UserType.SUPER_ADMIN.name())
                     .orElseThrow(() -> {
                         log.error("Super admin not found: {}", username);
                         return new UsernameNotFoundException("Super admin not found: " + username);
@@ -86,5 +84,5 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         return UserPrincipal.create(user, tenantCode);
     }
-    
+
 }

@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 @ForceTenantSchema
+@Transactional("tenantTransactionManager")
 public class SectionService {
 
     private final SectionRepository sectionRepository;

@@ -35,6 +35,10 @@ public class TenantInterceptor implements HandlerInterceptor {
     }
 
     private void setSchemaForEndpoint(String uri) {
+        log.info("=== INTERCEPTOR: Processing URI: {}", uri);
+        log.info("Current TenantContext: {}", TenantContext.getCurrentTenant());
+        log.info("Current SchemaContext BEFORE routing: {}", SchemaContext.getCurrentSchema());
+
         // MASTER SCHEMA endpoints (User authentication and management)
         if (isAuthEndpoint(uri) ||
                 isUserManagementEndpoint(uri) ||

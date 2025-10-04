@@ -5,6 +5,7 @@ import com.erp.common.jwt.UserPrincipal;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 @Component
 @Profile("dev")  // Only run in development

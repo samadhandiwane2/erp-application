@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 @ForceTenantSchema  // Force all methods to use tenant schema
+@Transactional("tenantTransactionManager")
 public class StudentManagementService {
 
     private final StudentRepository studentRepository;

@@ -61,7 +61,7 @@ public class EmailChangeService {
         }
 
         // Check if new email is already taken
-        if (userRepository.existsByEmailAndIsActiveTrue(request.getNewEmail())) {
+        if (userRepository.existsByEmailAndIsActiveTrue(request.getNewEmail()) == 1) {
             throw new AuthenticationException("Email address is already in use");
         }
 
@@ -122,7 +122,7 @@ public class EmailChangeService {
                 .orElseThrow(() -> new AuthenticationException("User not found"));
 
         // Check if new email is still available
-        if (userRepository.existsByEmailAndIsActiveTrue(verificationToken.getNewEmail())) {
+        if (userRepository.existsByEmailAndIsActiveTrue(verificationToken.getNewEmail()) == 1) {
             throw new AuthenticationException("Email address is no longer available");
         }
 

@@ -14,25 +14,27 @@ import java.util.Optional;
 @Repository
 public interface PasswordResetTokenRepository extends JpaRepository<PasswordResetToken, Long> {
 
-    Optional<PasswordResetToken> findByEmailAndResetCodeAndIsUsedFalseAndExpiresAtAfter(
-            String email, String resetCode, LocalDateTime currentTime);
+    @Query(value = "SELECT * FROM erp_master.password_reset_tokens WHERE email = :email AND reset_code = :resetCode AND is_used = false AND expires_at > :currentTime LIMIT 1", nativeQuery = true)
+    Optional<PasswordResetToken> findByEmailAndResetCodeAndIsUsedFalseAndExpiresAtAfter(@Param("email") String email, @Param("resetCode") String resetCode, @Param("currentTime") LocalDateTime currentTime);
 
-    Optional<PasswordResetToken> findByEmailAndResetCode(String email, String resetCode);
+    @Query(value = "SELECT * FROM erp_master.password_reset_tokens WHERE email = :email AND reset_code = :resetCode LIMIT 1", nativeQuery = true)
+    Optional<PasswordResetToken> findByEmailAndResetCode(@Param("email") String email, @Param("resetCode") String resetCode);
 
-    @Query("SELECT COUNT(p) FROM PasswordResetToken p WHERE p.email = :email AND p.createdAt > :since")
+    @Query(value = "SELECT COUNT(*) FROM erp_master.password_reset_tokens WHERE email = :email AND created_at > :since", nativeQuery = true)
     long countByEmailAndCreatedAtAfter(@Param("email") String email, @Param("since") LocalDateTime since);
 
-    List<PasswordResetToken> findByEmailAndIsUsedFalseAndExpiresAtAfter(String email, LocalDateTime currentTime);
+    @Query(value = "SELECT * FROM erp_master.password_reset_tokens WHERE email = :email AND is_used = false AND expires_at > :currentTime", nativeQuery = true)
+    List<PasswordResetToken> findByEmailAndIsUsedFalseAndExpiresAtAfter(@Param("email") String email, @Param("currentTime") LocalDateTime currentTime);
 
     @Modifying
-    @Query("UPDATE PasswordResetToken p SET p.isUsed = true WHERE p.email = :email AND p.isUsed = false")
+    @Query(value = "UPDATE erp_master.password_reset_tokens SET is_used = true WHERE email = :email AND is_used = false", nativeQuery = true)
     int markAllAsUsedByEmail(@Param("email") String email);
 
     @Modifying
-    @Query("DELETE FROM PasswordResetToken p WHERE p.expiresAt < :currentTime")
+    @Query(value = "DELETE FROM erp_master.password_reset_tokens WHERE expires_at < :currentTime", nativeQuery = true)
     int deleteExpiredTokens(@Param("currentTime") LocalDateTime currentTime);
 
-    @Query("SELECT p FROM PasswordResetToken p WHERE p.expiresAt < :currentTime")
+    @Query(value = "SELECT * FROM erp_master.password_reset_tokens WHERE expires_at < :currentTime", nativeQuery = true)
     List<PasswordResetToken> findExpiredTokens(@Param("currentTime") LocalDateTime currentTime);
 
 }

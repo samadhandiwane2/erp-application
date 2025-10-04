@@ -2,27 +2,29 @@ package com.erp.tenant.service;
 
 import com.erp.common.annotation.ForceTenantSchema;
 import com.erp.common.jwt.UserPrincipal;
-import com.erp.tenant.dto.student.PromotionRequest;
 import com.erp.tenant.dto.student.BulkPromotionRequest;
+import com.erp.tenant.dto.student.PromotionRequest;
 import com.erp.tenant.dto.student.PromotionResponse;
-import com.erp.tenant.entity.*;
-import com.erp.tenant.repository.*;
+import com.erp.tenant.entity.Student;
+import com.erp.tenant.entity.StudentClassHistory;
+import com.erp.tenant.entity.StudentPromotion;
+import com.erp.tenant.repository.StudentClassHistoryRepository;
+import com.erp.tenant.repository.StudentPromotionRepository;
+import com.erp.tenant.repository.StudentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 @ForceTenantSchema
+@Transactional("tenantTransactionManager")
 public class StudentPromotionService {
 
     private final StudentRepository studentRepository;

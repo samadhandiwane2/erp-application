@@ -23,7 +23,6 @@ import java.time.LocalDateTime;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-// Keep @ForceMasterSchema but we'll also handle it manually as backup
 @ForceMasterSchema
 public class AuthenticationService {
 
@@ -72,12 +71,22 @@ public class AuthenticationService {
                 throw new AuthenticationException("Invalid credentials");
             }
 
-            // Reset failed attempts on successful login
-            resetFailedLoginAttempts(user);
+            // Reset failed attempts and update last login on successful authentication
+            int updated = userRepository.updateLoginInfo(
+                    user.getId(),
+                    LocalDateTime.now(),
+                    0, // reset failed attempts
+                    null, // clear account lock
+                    LocalDateTime.now(),
+                    user.getId()
+            );
 
-            // Update last login
-            user.setLastLogin(LocalDateTime.now());
-            userRepository.save(user);
+            if (updated == 0) {
+                log.warn("Failed to update login info for user: {}", user.getId());
+                throw new AuthenticationException("Failed to update user login information");
+            }
+
+            log.info("Successfully updated login info for user: {}", user.getId());
 
             // Generate tokens
             String accessToken = tokenProvider.generateAccessToken(userPrincipal);
@@ -150,28 +159,25 @@ public class AuthenticationService {
         }
 
         int attempts = user.getFailedLoginAttempts() + 1;
-        user.setFailedLoginAttempts(attempts);
+        LocalDateTime lockedUntil = null;
 
         if (attempts >= MAX_LOGIN_ATTEMPTS) {
-            user.setAccountLockedUntil(LocalDateTime.now().plusMinutes(LOCKOUT_DURATION_MINUTES));
+            lockedUntil = LocalDateTime.now().plusMinutes(LOCKOUT_DURATION_MINUTES);
             log.warn("Account locked for user: {} due to {} failed login attempts",
                     user.getUsername(), attempts);
         }
 
-        userRepository.save(user);
-    }
+        // Use native query to update failed login attempts
+        int updated = userRepository.updateFailedLoginAttempts(
+                user.getId(),
+                attempts,
+                lockedUntil,
+                LocalDateTime.now(),
+                0L
+        );
 
-    private void resetFailedLoginAttempts(User user) {
-        // Ensure we're using master schema for user updates
-        String currentSchema = SchemaContext.getCurrentSchema();
-        if (!"master".equals(currentSchema)) {
-            SchemaContext.useMasterSchema();
-        }
-
-        if (user.getFailedLoginAttempts() > 0 || user.getAccountLockedUntil() != null) {
-            user.setFailedLoginAttempts(0);
-            user.setAccountLockedUntil(null);
-            userRepository.save(user);
+        if (updated == 0) {
+            log.error("Failed to update failed login attempts for user: {}", user.getId());
         }
     }
 

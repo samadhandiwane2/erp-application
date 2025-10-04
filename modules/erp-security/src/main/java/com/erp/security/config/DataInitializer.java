@@ -28,7 +28,7 @@ public class DataInitializer implements CommandLineRunner {
 
     private void initializeDefaultData() {
         // Create Super Admin if not exists
-        if (!userRepository.existsByUsernameAndIsActiveTrue("superadmin")) {
+        if (!(userRepository.existsByUsernameAndIsActiveTrue("superadmin") == 1)) {
             User superAdmin = new User();
             superAdmin.setUsername("superadmin");
             superAdmin.setEmail("superadmin@erp.com");
@@ -45,7 +45,7 @@ public class DataInitializer implements CommandLineRunner {
         }
 
         // Create a demo tenant if not exists
-        if (!tenantRepository.existsByTenantCodeAndIsActiveTrue("DEMO")) {
+        if (!(tenantRepository.existsByTenantCodeAndIsActiveTrue("DEMO") == 1)) {
             Tenant demoTenant = new Tenant();
             demoTenant.setTenantName("Demo Company");
             demoTenant.setTenantCode("DEMO");
@@ -62,7 +62,7 @@ public class DataInitializer implements CommandLineRunner {
             log.info("Demo tenant created with code: DEMO");
 
             // Create tenant admin for demo tenant
-            if (!userRepository.existsByUsernameAndIsActiveTrue("demo.admin")) {
+            if (!(userRepository.existsByUsernameAndIsActiveTrue("demo.admin") == 1)) {
                 User tenantAdmin = new User();
                 tenantAdmin.setUsername("demo.admin");
                 tenantAdmin.setEmail("admin@demo.com");
@@ -79,7 +79,7 @@ public class DataInitializer implements CommandLineRunner {
             }
 
             // Create tenant manager for demo tenant
-            if (!userRepository.existsByUsernameAndIsActiveTrue("demo.manager")) {
+            if (!(userRepository.existsByUsernameAndIsActiveTrue("demo.manager") == 1)) {
                 User tenantManager = new User();
                 tenantManager.setUsername("demo.manager");
                 tenantManager.setEmail("manager@demo.com");
@@ -96,7 +96,7 @@ public class DataInitializer implements CommandLineRunner {
             }
 
             // Create tenant user for demo tenant
-            if (!userRepository.existsByUsernameAndIsActiveTrue("demo.user")) {
+            if (!(userRepository.existsByUsernameAndIsActiveTrue("demo.user") == 1)) {
                 User tenantUser = new User();
                 tenantUser.setUsername("demo.user");
                 tenantUser.setEmail("user@demo.com");

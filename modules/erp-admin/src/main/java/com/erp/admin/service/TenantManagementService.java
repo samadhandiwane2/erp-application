@@ -1,13 +1,13 @@
 package com.erp.admin.service;
 
 import com.erp.common.annotation.ForceMasterSchema;
+import com.erp.common.config.MultiTenantDataSourceConfig;
 import com.erp.common.dto.tenant.CreateTenantRequest;
 import com.erp.common.dto.tenant.TenantResponse;
 import com.erp.common.dto.tenant.TenantSearchRequest;
 import com.erp.common.dto.tenant.UpdateTenantRequest;
 import com.erp.common.entity.Tenant;
 import com.erp.common.entity.User;
-import com.erp.common.config.MultiTenantDataSourceConfig;
 import com.erp.common.jwt.UserPrincipal;
 import com.erp.common.repository.TenantRepository;
 import com.erp.common.service.DatabaseInitializationService;
@@ -20,7 +20,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import javax.sql.DataSource;
 import java.time.LocalDateTime;
@@ -30,7 +29,6 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
 @ForceMasterSchema
 public class TenantManagementService {
 
@@ -46,15 +44,15 @@ public class TenantManagementService {
     public TenantResponse createTenant(CreateTenantRequest request, UserPrincipal currentUser) {
 
         // Validate tenant code uniqueness
-        if (tenantRepository.existsByTenantCodeAndIsActiveTrue(request.getTenantCode())) {
+        if (tenantRepository.existsByTenantCodeAndIsActiveTrue(request.getTenantCode()) == 1) {
             throw new RuntimeException("Tenant code already exists: " + request.getTenantCode());
         }
         // Validate admin username uniqueness
-        if (userRepository.existsByUsernameAndIsActiveTrue(request.getAdminUsername())) {
+        if (userRepository.existsByUsernameAndIsActiveTrue(request.getAdminUsername()) == 1) {
             throw new RuntimeException("Admin username already exists: " + request.getAdminUsername());
         }
         // Validate admin email uniqueness
-        if (userRepository.existsByEmailAndIsActiveTrue(request.getAdminEmail())) {
+        if (userRepository.existsByEmailAndIsActiveTrue(request.getAdminEmail()) == 1) {
             throw new RuntimeException("Admin email already exists: " + request.getAdminEmail());
         }
 
@@ -315,7 +313,7 @@ public class TenantManagementService {
                 request.getTenantName(),
                 request.getTenantCode(),
                 request.getContactEmail(),
-                request.getStatus(),
+                request.getStatus().name(),
                 request.getIsActive(),
                 request.getSubscriptionStartAfter(),
                 request.getSubscriptionEndBefore(),
@@ -368,7 +366,7 @@ public class TenantManagementService {
 
         // Use findFirst or handle multiple admins
         Optional<User> tenantAdmin = userRepository.findFirstByTenantIdAndUserTypeAndIsActiveTrueOrderByCreatedAtDesc(
-                tenant.getId(), User.UserType.TENANT_ADMIN
+                tenant.getId(), User.UserType.TENANT_ADMIN.name()
         );
         tenantAdmin.ifPresent(admin -> response.setTenantAdmin(convertToTenantAdminInfo(admin)));
 

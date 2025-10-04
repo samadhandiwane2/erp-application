@@ -22,12 +22,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 @ForceTenantSchema
+@Transactional("tenantTransactionManager")
 public class ClassService {
 
     private final ClassRepository classRepository;
     private final SectionRepository sectionRepository;
 
-    @Transactional
+    @Transactional("tenantTransactionManager")
     public ClassResponse createClass(CreateClassRequest request, UserPrincipal currentUser) {
         log.info("Creating class: {}", request.getClassName());
 
@@ -48,7 +49,7 @@ public class ClassService {
         return mapToResponse(saved);
     }
 
-    @Transactional
+    @Transactional("tenantTransactionManager")
     public ClassResponse updateClass(Long id, UpdateClassRequest request, UserPrincipal currentUser) {
         Class classEntity = classRepository.findByIdAndIsActiveTrue(id)
                 .orElseThrow(() -> new RuntimeException("Class not found"));

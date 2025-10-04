@@ -19,6 +19,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 @ForceTenantSchema
+@Transactional("tenantTransactionManager")
 public class AcademicYearService {
 
     private final AcademicYearRepository academicYearRepository;

@@ -74,6 +74,9 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
 
+                        // Debug endpoints - restricted to admins only
+                        .requestMatchers("/api/debug/**").hasAnyRole("SUPER_ADMIN", "TENANT_ADMIN")
+
                         // Test endpoints (public ones)
                         .requestMatchers("/api/test/public").permitAll()
 
@@ -118,4 +121,5 @@ public class SecurityConfig {
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
+
 }

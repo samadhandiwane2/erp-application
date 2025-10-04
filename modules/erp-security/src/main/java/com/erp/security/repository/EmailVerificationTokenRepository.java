@@ -14,25 +14,27 @@ import java.util.Optional;
 @Repository
 public interface EmailVerificationTokenRepository extends JpaRepository<EmailVerificationToken, Long> {
 
-    Optional<EmailVerificationToken> findByVerificationTokenAndIsVerifiedFalseAndExpiresAtAfter(
-            String verificationToken, LocalDateTime currentTime);
+    @Query(value = "SELECT * FROM erp_master.email_verification_tokens WHERE verification_token = :verificationToken AND is_verified = false AND expires_at > :currentTime LIMIT 1", nativeQuery = true)
+    Optional<EmailVerificationToken> findByVerificationTokenAndIsVerifiedFalseAndExpiresAtAfter(@Param("verificationToken") String verificationToken, @Param("currentTime") LocalDateTime currentTime);
 
-    Optional<EmailVerificationToken> findByUserIdAndIsVerifiedFalseAndExpiresAtAfter(
-            Long userId, LocalDateTime currentTime);
+    @Query(value = "SELECT * FROM erp_master.email_verification_tokens WHERE user_id = :userId AND is_verified = false AND expires_at > :currentTime LIMIT 1", nativeQuery = true)
+    Optional<EmailVerificationToken> findByUserIdAndIsVerifiedFalseAndExpiresAtAfter(@Param("userId") Long userId, @Param("currentTime") LocalDateTime currentTime);
 
-    List<EmailVerificationToken> findByUserIdAndIsVerifiedFalse(Long userId);
+    @Query(value = "SELECT * FROM erp_master.email_verification_tokens WHERE user_id = :userId AND is_verified = false", nativeQuery = true)
+    List<EmailVerificationToken> findByUserIdAndIsVerifiedFalse(@Param("userId") Long userId);
 
-    boolean existsByNewEmailAndIsVerifiedFalseAndExpiresAtAfter(String newEmail, LocalDateTime currentTime);
+    @Query(value = "SELECT EXISTS(SELECT 1 FROM erp_master.email_verification_tokens WHERE new_email = :newEmail AND is_verified = false AND expires_at > :currentTime)", nativeQuery = true)
+    boolean existsByNewEmailAndIsVerifiedFalseAndExpiresAtAfter(@Param("newEmail") String newEmail, @Param("currentTime") LocalDateTime currentTime);
 
     @Modifying
-    @Query("UPDATE EmailVerificationToken e SET e.isVerified = true WHERE e.userId = :userId AND e.isVerified = false")
+    @Query(value = "UPDATE erp_master.email_verification_tokens SET is_verified = true WHERE user_id = :userId AND is_verified = false", nativeQuery = true)
     int invalidateAllPendingTokensByUser(@Param("userId") Long userId);
 
     @Modifying
-    @Query("DELETE FROM EmailVerificationToken e WHERE e.expiresAt < :currentTime")
+    @Query(value = "DELETE FROM erp_master.email_verification_tokens WHERE expires_at < :currentTime", nativeQuery = true)
     int deleteExpiredTokens(@Param("currentTime") LocalDateTime currentTime);
 
-    @Query("SELECT COUNT(e) FROM EmailVerificationToken e WHERE e.userId = :userId AND e.createdAt > :since")
+    @Query(value = "SELECT COUNT(*) FROM erp_master.email_verification_tokens WHERE user_id = :userId AND created_at > :since", nativeQuery = true)
     long countByUserIdAndCreatedAtAfter(@Param("userId") Long userId, @Param("since") LocalDateTime since);
 
 }
