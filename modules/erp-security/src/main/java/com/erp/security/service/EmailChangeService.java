@@ -44,58 +44,54 @@ public class EmailChangeService {
 
     @Transactional
     public void requestEmailChange(EmailChangeRequest request, UserPrincipal currentUser) {
-        // Get current user
         User user = userRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new AuthenticationException("User not found"));
 
-        // Validate password
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
             log.warn("Invalid password for email change request by user: {} from IP: {}",
                     user.getUsername(), getClientIpAddress());
             throw new AuthenticationException("Current password is incorrect");
         }
 
-        // Check if new email is same as current
         if (request.getNewEmail().equalsIgnoreCase(user.getEmail())) {
             throw new AuthenticationException("New email must be different from current email");
         }
 
-        // Check if new email is already taken
         if (userRepository.existsByEmailAndIsActiveTrue(request.getNewEmail()) == 1) {
             throw new AuthenticationException("Email address is already in use");
         }
 
-        // Check rate limiting
         checkRateLimit(user.getId());
 
-        // Check if there's already a pending change for this email
         if (tokenRepository.existsByNewEmailAndIsVerifiedFalseAndExpiresAtAfter(
                 request.getNewEmail(), LocalDateTime.now())) {
             throw new AuthenticationException("There is already a pending email change request for this address");
         }
 
-        // Invalidate any existing pending tokens for this user
         tokenRepository.invalidateAllPendingTokensByUser(user.getId());
 
-        // Generate verification token
         String verificationToken = generateVerificationToken();
+        LocalDateTime now = LocalDateTime.now();
 
-        // Create verification token record
-        EmailVerificationToken token = new EmailVerificationToken();
-        token.setUserId(user.getId());
-        token.setOldEmail(user.getEmail());
-        token.setNewEmail(request.getNewEmail());
-        token.setVerificationToken(verificationToken);
-        token.setExpiresAt(LocalDateTime.now().plusHours(verificationTokenExpiryHours));
-        token.setIpAddress(getClientIpAddress());
+        int inserted = tokenRepository.insertToken(
+                user.getId(),
+                user.getEmail(),
+                request.getNewEmail(),
+                verificationToken,
+                now.plusHours(verificationTokenExpiryHours),
+                getClientIpAddress(),
+                false,
+                now,
+                now
+        );
 
-        tokenRepository.save(token);
+        if (inserted == 0) {
+            throw new RuntimeException("Failed to create verification token");
+        }
 
-        // Send verification email to new email address
         emailService.sendEmailChangeVerificationEmail(
                 request.getNewEmail(), user.getFirstName(), verificationToken);
 
-        // Send notification to old email address
         emailService.sendEmailChangeNotificationEmail(
                 user.getEmail(), user.getFirstName(), request.getNewEmail());
 
@@ -105,7 +101,6 @@ public class EmailChangeService {
 
     @Transactional
     public void verifyEmailChange(String token) {
-        // Find valid token
         Optional<EmailVerificationToken> tokenOpt = tokenRepository
                 .findByVerificationTokenAndIsVerifiedFalseAndExpiresAtAfter(token, LocalDateTime.now());
 
@@ -117,32 +112,40 @@ public class EmailChangeService {
 
         EmailVerificationToken verificationToken = tokenOpt.get();
 
-        // Get user
         User user = userRepository.findById(verificationToken.getUserId())
                 .orElseThrow(() -> new AuthenticationException("User not found"));
 
-        // Check if new email is still available
         if (userRepository.existsByEmailAndIsActiveTrue(verificationToken.getNewEmail()) == 1) {
             throw new AuthenticationException("Email address is no longer available");
         }
 
-        // Update user email
         String oldEmail = user.getEmail();
-        user.setEmail(verificationToken.getNewEmail());
-        user.setUpdatedAt(LocalDateTime.now());
-        user.setUpdatedBy(user.getId());
+        LocalDateTime now = LocalDateTime.now();
 
-        userRepository.save(user);
+        int userUpdated = userRepository.updateUserEmail(
+                user.getId(),
+                verificationToken.getNewEmail(),
+                now,
+                user.getId()
+        );
 
-        // Mark token as verified
-        verificationToken.setIsVerified(true);
-        verificationToken.setVerifiedAt(LocalDateTime.now());
-        tokenRepository.save(verificationToken);
+        if (userUpdated == 0) {
+            throw new RuntimeException("Failed to update user email");
+        }
 
-        // Invalidate any other pending tokens for this user
+        int tokenUpdated = tokenRepository.updateTokenVerified(
+                verificationToken.getId(),
+                true,
+                now,
+                now
+        );
+
+        if (tokenUpdated == 0) {
+            throw new RuntimeException("Failed to update token");
+        }
+
         tokenRepository.invalidateAllPendingTokensByUser(user.getId());
 
-        // Send confirmation emails
         emailService.sendEmailChangeSuccessEmail(verificationToken.getNewEmail(), user.getFirstName());
         emailService.sendEmailChangeNotificationOldEmail(oldEmail, user.getFirstName(), verificationToken.getNewEmail());
 
@@ -199,7 +202,6 @@ public class EmailChangeService {
         return request.getRemoteAddr();
     }
 
-    // Cleanup job method
     @Transactional
     public void cleanupExpiredTokens() {
         int deletedCount = tokenRepository.deleteExpiredTokens(LocalDateTime.now());

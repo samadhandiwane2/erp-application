@@ -161,4 +161,63 @@ public interface UserRepository extends JpaRepository<User, Long> {
     int updateAllUsersByTenantId(@Param("tenantId") Long tenantId, @Param("isActive") Boolean isActive,
                                  @Param("updatedAt") LocalDateTime updatedAt, @Param("updatedBy") Long updatedBy);
 
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE erp_master.users 
+            SET email = :email,
+                updated_at = :updatedAt,
+                updated_by = :updatedBy
+            WHERE id = :userId
+            """, nativeQuery = true)
+    int updateUserEmail(@Param("userId") Long userId, @Param("email") String email,
+                        @Param("updatedAt") LocalDateTime updatedAt, @Param("updatedBy") Long updatedBy);
+
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE erp_master.users 
+            SET first_name = :firstName,
+                last_name = :lastName,
+                email = :email,
+                phone = :phone,
+                updated_at = :updatedAt,
+                updated_by = :updatedBy
+            WHERE id = :userId
+            """, nativeQuery = true)
+    int updateUserProfile(@Param("userId") Long userId, @Param("firstName") String firstName,
+                          @Param("lastName") String lastName, @Param("email") String email,
+                          @Param("phone") String phone, @Param("updatedAt") LocalDateTime updatedAt,
+                          @Param("updatedBy") Long updatedBy);
+
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE erp_master.users 
+            SET password_hash = :passwordHash,
+                account_locked_until = :lockedUntil,
+                failed_login_attempts = :failedAttempts,
+                updated_at = :updatedAt,
+                updated_by = :updatedBy
+            WHERE id = :userId
+            """, nativeQuery = true)
+    int updateUserPassword(@Param("userId") Long userId, @Param("passwordHash") String passwordHash,
+                           @Param("lockedUntil") LocalDateTime lockedUntil, @Param("failedAttempts") Integer failedAttempts,
+                           @Param("updatedAt") LocalDateTime updatedAt, @Param("updatedBy") Long updatedBy);
+
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE erp_master.users 
+            SET is_active = :isActive,
+                account_locked_until = :lockedUntil,
+                failed_login_attempts = :failedAttempts,
+                updated_at = :updatedAt,
+                updated_by = :updatedBy
+            WHERE id = :userId
+            """, nativeQuery = true)
+    int updateUserStatusAndSecurity(@Param("userId") Long userId, @Param("isActive") Boolean isActive,
+                                    @Param("lockedUntil") LocalDateTime lockedUntil, @Param("failedAttempts") Integer failedAttempts,
+                                    @Param("updatedAt") LocalDateTime updatedAt, @Param("updatedBy") Long updatedBy);
+
 }

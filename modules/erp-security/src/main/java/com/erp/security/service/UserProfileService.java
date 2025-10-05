@@ -48,38 +48,28 @@ public class UserProfileService {
     }
 
     @Transactional
-    public UserProfileResponse updateUserProfile(UserProfileRequest request, UserPrincipal currentUser) {
+    public UserProfileResponse updateUserProfile(UserProfileRequest profileRequest, UserPrincipal currentUser) {
         User user = userRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new AuthenticationException("User not found"));
 
-        // Update profile fields
-        boolean hasChanges = false;
-
-        if (!request.getFirstName().equals(user.getFirstName())) {
-            user.setFirstName(request.getFirstName());
-            hasChanges = true;
-        }
-
-        if (!request.getLastName().equals(user.getLastName())) {
-            user.setLastName(request.getLastName());
-            hasChanges = true;
-        }
-
-        // Handle phone number (can be empty)
-        String newPhone = request.getPhone() != null ? request.getPhone().trim() : null;
-        if (newPhone != null && newPhone.isEmpty()) {
-            newPhone = null;
-        }
-
-        if (!java.util.Objects.equals(newPhone, user.getPhone())) {
-            user.setPhone(newPhone);
-            hasChanges = true;
-        }
+        boolean hasChanges = !profileRequest.getFirstName().equals(user.getFirstName()) ||
+                !profileRequest.getLastName().equals(user.getLastName()) ||
+                !java.util.Objects.equals(normalizePhone(profileRequest.getPhone()), user.getPhone());
 
         if (hasChanges) {
-            user.setUpdatedAt(LocalDateTime.now());
-            user.setUpdatedBy(currentUser.getId());
-            userRepository.save(user);
+            int updated = userRepository.updateUserProfile(
+                    user.getId(),
+                    profileRequest.getFirstName(),
+                    profileRequest.getLastName(),
+                    user.getEmail(),
+                    normalizePhone(profileRequest.getPhone()),
+                    LocalDateTime.now(),
+                    currentUser.getId()
+            );
+
+            if (updated == 0) {
+                throw new RuntimeException("Failed to update profile");
+            }
 
             log.info("Profile updated by user: {} from IP: {}",
                     user.getUsername(), getClientIpAddress());
@@ -87,64 +77,67 @@ public class UserProfileService {
             log.debug("No profile changes detected for user: {}", user.getUsername());
         }
 
+        User updatedUser = userRepository.findById(currentUser.getId())
+                .orElseThrow(() -> new RuntimeException("Failed to fetch updated user"));
+
         Tenant tenant = null;
-        if (user.getTenantId() != null) {
-            tenant = tenantRepository.findById(user.getTenantId()).orElse(null);
+        if (updatedUser.getTenantId() != null) {
+            tenant = tenantRepository.findById(updatedUser.getTenantId()).orElse(null);
         }
 
-        return buildUserProfileResponse(user, tenant);
+        return buildUserProfileResponse(updatedUser, tenant);
     }
 
     @Transactional
     public void changePassword(ChangePasswordRequest changePasswordRequest, UserPrincipal currentUser) {
-        // Check rate limiting
         rateLimitingService.checkPasswordChangeRateLimit(currentUser.getId());
 
-        // Validate password confirmation
         if (!changePasswordRequest.getNewPassword().equals(changePasswordRequest.getConfirmPassword())) {
             throw new AuthenticationException("New password and confirm password do not match");
         }
 
-        // Validate new password is different from current
         if (changePasswordRequest.getCurrentPassword().equals(changePasswordRequest.getNewPassword())) {
             throw new AuthenticationException("New password must be different from current password");
         }
 
-        // Get user from database
         User user = userRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new AuthenticationException("User not found"));
 
-        // Validate current password
         if (!passwordEncoder.matches(changePasswordRequest.getCurrentPassword(), user.getPasswordHash())) {
             log.warn("Invalid current password attempt for user: {} from IP: {}",
                     user.getUsername(), getClientIpAddress());
             throw new AuthenticationException("Current password is incorrect");
         }
 
-        // Update password
-        user.setPasswordHash(passwordEncoder.encode(changePasswordRequest.getNewPassword()));
-        user.setUpdatedAt(LocalDateTime.now());
-        user.setUpdatedBy(currentUser.getId());
+        int updated = userRepository.updateUserPassword(
+                user.getId(),
+                passwordEncoder.encode(changePasswordRequest.getNewPassword()),
+                null,
+                0,
+                LocalDateTime.now(),
+                currentUser.getId()
+        );
 
-        // Clear any account lockout (if exists)
-        user.setAccountLockedUntil(null);
-        user.setFailedLoginAttempts(0);
+        if (updated == 0) {
+            throw new RuntimeException("Failed to update password");
+        }
 
-        userRepository.save(user);
-
-        // Clear rate limiting after successful change
         rateLimitingService.clearPasswordChangeAttempts(currentUser.getId());
 
-        // Send confirmation email
         try {
             emailService.sendPasswordChangeConfirmationEmail(user.getEmail(), user.getFirstName());
         } catch (Exception e) {
             log.error("Failed to send password change confirmation email to: {}", user.getEmail(), e);
-            // Don't fail the operation if email fails
         }
 
         log.info("Password changed successfully for user: {} from IP: {}",
                 user.getUsername(), getClientIpAddress());
+    }
+
+    private String normalizePhone(String phone) {
+        if (phone == null) return null;
+        String normalized = phone.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private UserProfileResponse buildUserProfileResponse(User user, Tenant tenant) {
@@ -171,7 +164,7 @@ public class UserProfileService {
     }
 
     private Double calculateProfileCompleteness(User user) {
-        int totalFields = 5; // username, email, firstName, lastName, phone
+        int totalFields = 5;
         int completedFields = 0;
 
         if (user.getUsername() != null && !user.getUsername().trim().isEmpty()) {

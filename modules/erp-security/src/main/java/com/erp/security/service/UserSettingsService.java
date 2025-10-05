@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -27,7 +28,6 @@ public class UserSettingsService {
     private final UserPreferencesRepository preferencesRepository;
     private final UserRepository userRepository;
 
-    // Valid timezone IDs
     private static final Set<String> VALID_TIMEZONES = Set.of(
             "UTC", "America/New_York", "America/Los_Angeles", "America/Chicago",
             "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Tokyo",
@@ -36,7 +36,6 @@ public class UserSettingsService {
 
     @Transactional(readOnly = true)
     public UserSettingsResponse getUserSettings(UserPrincipal currentUser) {
-        // Verify user exists
         User user = userRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new AuthenticationException("User not found"));
 
@@ -59,109 +58,119 @@ public class UserSettingsService {
     }
 
     @Transactional
-    public UserSettingsResponse updateUserSettings(UserSettingsRequest request, UserPrincipal currentUser) {
-        // Verify user exists
+    public UserSettingsResponse updateUserSettings(UserSettingsRequest settingsRequest, UserPrincipal currentUser) {
         User user = userRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new AuthenticationException("User not found"));
 
-        // Validate timezone
-        if (!isValidTimezone(request.getTimezone())) {
-            throw new AuthenticationException("Invalid timezone: " + request.getTimezone());
+        if (!isValidTimezone(settingsRequest.getTimezone())) {
+            throw new AuthenticationException("Invalid timezone: " + settingsRequest.getTimezone());
         }
 
-        UserPreferences preferences = preferencesRepository.findByUserId(currentUser.getId())
-                .orElseGet(() -> createDefaultPreferences(user));
+        Optional<UserPreferences> existingPref = preferencesRepository.findByUserId(currentUser.getId());
+        LocalDateTime now = LocalDateTime.now();
 
-        // Update preferences
-        boolean hasChanges = false;
+        if (existingPref.isEmpty()) {
+            int inserted = preferencesRepository.insertPreferences(
+                    user.getId(),
+                    settingsRequest.getTimezone(),
+                    settingsRequest.getLanguage(),
+                    settingsRequest.getEmailNotifications(),
+                    settingsRequest.getMarketingEmails(),
+                    settingsRequest.getSecurityAlerts(),
+                    settingsRequest.getTheme(),
+                    settingsRequest.getDateFormat(),
+                    settingsRequest.getTimeFormat(),
+                    now,
+                    now
+            );
 
-        if (!request.getTimezone().equals(preferences.getTimezone())) {
-            preferences.setTimezone(request.getTimezone());
-            hasChanges = true;
-        }
+            if (inserted == 0) {
+                throw new RuntimeException("Failed to create preferences");
+            }
 
-        if (!request.getLanguage().equals(preferences.getLanguage())) {
-            preferences.setLanguage(request.getLanguage());
-            hasChanges = true;
-        }
-
-        if (!request.getEmailNotifications().equals(preferences.getEmailNotifications())) {
-            preferences.setEmailNotifications(request.getEmailNotifications());
-            hasChanges = true;
-        }
-
-        if (!request.getMarketingEmails().equals(preferences.getMarketingEmails())) {
-            preferences.setMarketingEmails(request.getMarketingEmails());
-            hasChanges = true;
-        }
-
-        if (!request.getSecurityAlerts().equals(preferences.getSecurityAlerts())) {
-            preferences.setSecurityAlerts(request.getSecurityAlerts());
-            hasChanges = true;
-        }
-
-        if (!request.getTheme().equals(preferences.getTheme())) {
-            preferences.setTheme(request.getTheme());
-            hasChanges = true;
-        }
-
-        if (!request.getDateFormat().equals(preferences.getDateFormat())) {
-            preferences.setDateFormat(request.getDateFormat());
-            hasChanges = true;
-        }
-
-        if (!request.getTimeFormat().equals(preferences.getTimeFormat())) {
-            preferences.setTimeFormat(request.getTimeFormat());
-            hasChanges = true;
-        }
-
-        if (hasChanges) {
-            preferences.setUpdatedAt(LocalDateTime.now());
-            preferencesRepository.save(preferences);
-
-            log.info("Settings updated for user: {}", user.getUsername());
+            log.info("Settings created for user: {}", user.getUsername());
         } else {
-            log.debug("No settings changes detected for user: {}", user.getUsername());
+            UserPreferences preferences = existingPref.get();
+
+            boolean hasChanges = !settingsRequest.getTimezone().equals(preferences.getTimezone()) ||
+                    !settingsRequest.getLanguage().equals(preferences.getLanguage()) ||
+                    !settingsRequest.getEmailNotifications().equals(preferences.getEmailNotifications()) ||
+                    !settingsRequest.getMarketingEmails().equals(preferences.getMarketingEmails()) ||
+                    !settingsRequest.getSecurityAlerts().equals(preferences.getSecurityAlerts()) ||
+                    !settingsRequest.getTheme().equals(preferences.getTheme()) ||
+                    !settingsRequest.getDateFormat().equals(preferences.getDateFormat()) ||
+                    !settingsRequest.getTimeFormat().equals(preferences.getTimeFormat());
+
+            if (hasChanges) {
+                int updated = preferencesRepository.updatePreferences(
+                        user.getId(),
+                        settingsRequest.getTimezone(),
+                        settingsRequest.getLanguage(),
+                        settingsRequest.getEmailNotifications(),
+                        settingsRequest.getMarketingEmails(),
+                        settingsRequest.getSecurityAlerts(),
+                        settingsRequest.getTheme(),
+                        settingsRequest.getDateFormat(),
+                        settingsRequest.getTimeFormat(),
+                        now
+                );
+
+                if (updated == 0) {
+                    throw new RuntimeException("Failed to update preferences");
+                }
+
+                log.info("Settings updated for user: {}", user.getUsername());
+            } else {
+                log.debug("No settings changes detected for user: {}", user.getUsername());
+            }
         }
+
+        UserPreferences finalPreferences = preferencesRepository.findByUserId(currentUser.getId())
+                .orElseThrow(() -> new RuntimeException("Failed to fetch preferences"));
 
         return UserSettingsResponse.builder()
-                .timezone(preferences.getTimezone())
-                .language(preferences.getLanguage())
-                .emailNotifications(preferences.getEmailNotifications())
-                .marketingEmails(preferences.getMarketingEmails())
-                .securityAlerts(preferences.getSecurityAlerts())
-                .theme(preferences.getTheme())
-                .dateFormat(preferences.getDateFormat())
-                .timeFormat(preferences.getTimeFormat())
-                .updatedAt(preferences.getUpdatedAt())
+                .timezone(finalPreferences.getTimezone())
+                .language(finalPreferences.getLanguage())
+                .emailNotifications(finalPreferences.getEmailNotifications())
+                .marketingEmails(finalPreferences.getMarketingEmails())
+                .securityAlerts(finalPreferences.getSecurityAlerts())
+                .theme(finalPreferences.getTheme())
+                .dateFormat(finalPreferences.getDateFormat())
+                .timeFormat(finalPreferences.getTimeFormat())
+                .updatedAt(finalPreferences.getUpdatedAt())
                 .build();
     }
 
     private UserPreferences createDefaultPreferences(User user) {
-        UserPreferences preferences = new UserPreferences();
-        preferences.setUserId(user.getId());
-        preferences.setUser(user);
-        preferences.setTimezone("UTC");
-        preferences.setLanguage("en");
-        preferences.setEmailNotifications(true);
-        preferences.setMarketingEmails(false);
-        preferences.setSecurityAlerts(true);
-        preferences.setTheme("light");
-        preferences.setDateFormat("yyyy-MM-dd");
-        preferences.setTimeFormat("HH:mm");
-        preferences.setCreatedAt(LocalDateTime.now());
-        preferences.setUpdatedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
 
-        return preferencesRepository.save(preferences);
+        int inserted = preferencesRepository.insertPreferences(
+                user.getId(),
+                "UTC",
+                "en",
+                true,
+                false,
+                true,
+                "light",
+                "yyyy-MM-dd",
+                "HH:mm",
+                now,
+                now
+        );
+
+        if (inserted == 0) {
+            throw new RuntimeException("Failed to create default preferences");
+        }
+
+        return preferencesRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new RuntimeException("Failed to fetch created preferences"));
     }
 
     private boolean isValidTimezone(String timezone) {
-        // First check our predefined list
         if (VALID_TIMEZONES.contains(timezone)) {
             return true;
         }
 
-        // Also check against Java's available timezone IDs
         try {
             ZoneId.of(timezone);
             return true;
@@ -169,5 +178,4 @@ public class UserSettingsService {
             return false;
         }
     }
-
 }

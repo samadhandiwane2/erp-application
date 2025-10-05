@@ -33,27 +33,43 @@ public class UserManagementService {
 
     @Transactional
     public UserResponse createSuperAdmin(CreateSuperAdminRequest request, UserPrincipal currentUser) {
-        // Only super admins can create other super admins
         if (currentUser.getUserType() != User.UserType.SUPER_ADMIN) {
             throw new AccessDeniedException("Only super admins can create super admin users");
         }
 
         validateUniqueConstraints(request.getUsername(), request.getEmail(), null);
 
-        User superAdmin = new User();
-        superAdmin.setUsername(request.getUsername());
-        superAdmin.setEmail(request.getEmail());
-        superAdmin.setPasswordHash(passwordEncoder.encode(request.getPassword()));
-        superAdmin.setFirstName(request.getFirstName());
-        superAdmin.setLastName(request.getLastName());
-        superAdmin.setPhone(request.getPhone());
-        superAdmin.setUserType(User.UserType.SUPER_ADMIN);
-        superAdmin.setTenantId(null); // Super admin belongs to no tenant
-        superAdmin.setIsActive(true);
-        superAdmin.setCreatedAt(LocalDateTime.now());
-        superAdmin.setCreatedBy(currentUser.getId());
+        LocalDateTime now = LocalDateTime.now();
+        int inserted = userRepository.insertUser(
+                request.getUsername(),
+                request.getEmail(),
+                passwordEncoder.encode(request.getPassword()),
+                request.getFirstName(),
+                request.getLastName(),
+                request.getPhone(),
+                User.UserType.SUPER_ADMIN.name(),
+                null,
+                false,
+                0,
+                true,
+                now,
+                currentUser.getId(),
+                now,
+                currentUser.getId()
+        );
 
-        User savedUser = userRepository.save(superAdmin);
+        if (inserted == 0) {
+            throw new RuntimeException("Failed to create super admin");
+        }
+
+        Long userId = userRepository.getLastInsertId();
+        if (userId == null || userId == 0) {
+            throw new RuntimeException("Failed to retrieve created user ID");
+        }
+
+        User savedUser = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Failed to fetch created user"));
+
         log.info("Super admin created: {} by {}", savedUser.getUsername(), currentUser.getUsername());
 
         return convertToUserResponse(savedUser, null);
@@ -63,7 +79,6 @@ public class UserManagementService {
     public UserResponse createTenantUser(CreateUserRequest request, UserPrincipal currentUser) {
         validateCreateUserPermission(request, currentUser);
 
-        // Determine a tenant for the new user
         Long targetTenantId = determineTargetTenant(request, currentUser);
         Tenant tenant = null;
 
@@ -78,20 +93,37 @@ public class UserManagementService {
 
         validateUniqueConstraints(request.getUsername(), request.getEmail(), null);
 
-        User user = new User();
-        user.setUsername(request.getUsername());
-        user.setEmail(request.getEmail());
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
-        user.setFirstName(request.getFirstName());
-        user.setLastName(request.getLastName());
-        user.setPhone(request.getPhone());
-        user.setUserType(request.getUserType());
-        user.setTenantId(targetTenantId);
-        user.setIsActive(true);
-        user.setCreatedAt(LocalDateTime.now());
-        user.setCreatedBy(currentUser.getId());
+        LocalDateTime now = LocalDateTime.now();
+        int inserted = userRepository.insertUser(
+                request.getUsername(),
+                request.getEmail(),
+                passwordEncoder.encode(request.getPassword()),
+                request.getFirstName(),
+                request.getLastName(),
+                request.getPhone(),
+                request.getUserType().name(),
+                targetTenantId,
+                false,
+                0,
+                true,
+                now,
+                currentUser.getId(),
+                now,
+                currentUser.getId()
+        );
 
-        User savedUser = userRepository.save(user);
+        if (inserted == 0) {
+            throw new RuntimeException("Failed to create user");
+        }
+
+        Long userId = userRepository.getLastInsertId();
+        if (userId == null || userId == 0) {
+            throw new RuntimeException("Failed to retrieve created user ID");
+        }
+
+        User savedUser = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Failed to fetch created user"));
+
         log.info("User created: {} (type: {}) by {}", savedUser.getUsername(),
                 savedUser.getUserType(), currentUser.getUsername());
 
@@ -105,35 +137,41 @@ public class UserManagementService {
 
         validateUpdatePermission(user, currentUser);
 
-        // Prevent self-deactivation
         if (user.getId().equals(currentUser.getId()) && !request.getIsActive()) {
             throw new IllegalArgumentException("Cannot deactivate your own account");
         }
 
-        user.setIsActive(request.getIsActive());
-        user.setUpdatedAt(LocalDateTime.now());
-        user.setUpdatedBy(currentUser.getId());
+        LocalDateTime lockedUntil = request.getIsActive() ? null : user.getAccountLockedUntil();
+        Integer failedAttempts = request.getIsActive() ? 0 : user.getFailedLoginAttempts();
 
-        // Clear account lockout when activating
-        if (request.getIsActive()) {
-            user.setAccountLockedUntil(null);
-            user.setFailedLoginAttempts(0);
+        int updated = userRepository.updateUserStatusAndSecurity(
+                userId,
+                request.getIsActive(),
+                lockedUntil,
+                failedAttempts,
+                LocalDateTime.now(),
+                currentUser.getId()
+        );
+
+        if (updated == 0) {
+            throw new RuntimeException("Failed to update user status");
         }
 
-        User savedUser = userRepository.save(user);
+        User updatedUser = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Failed to fetch updated user"));
 
         log.info("User {} {} by {} (reason: {})",
-                savedUser.getUsername(),
+                updatedUser.getUsername(),
                 request.getIsActive() ? "activated" : "deactivated",
                 currentUser.getUsername(),
                 request.getReason());
 
         Tenant tenant = null;
-        if (savedUser.getTenantId() != null) {
-            tenant = tenantRepository.findById(savedUser.getTenantId()).orElse(null);
+        if (updatedUser.getTenantId() != null) {
+            tenant = tenantRepository.findById(updatedUser.getTenantId()).orElse(null);
         }
 
-        return convertToUserResponse(savedUser, tenant);
+        return convertToUserResponse(updatedUser, tenant);
     }
 
     @Transactional
@@ -144,36 +182,40 @@ public class UserManagementService {
         validateUpdatePermission(user, currentUser);
         validateUniqueConstraints(null, request.getEmail(), userId);
 
-        if (request.getFirstName() != null) {
-            user.setFirstName(request.getFirstName());
-        }
-        if (request.getLastName() != null) {
-            user.setLastName(request.getLastName());
-        }
-        if (request.getEmail() != null) {
-            user.setEmail(request.getEmail());
-        }
-        if (request.getPhone() != null) {
-            user.setPhone(request.getPhone());
+        String firstName = request.getFirstName() != null ? request.getFirstName() : user.getFirstName();
+        String lastName = request.getLastName() != null ? request.getLastName() : user.getLastName();
+        String email = request.getEmail() != null ? request.getEmail() : user.getEmail();
+        String phone = request.getPhone() != null ? request.getPhone() : user.getPhone();
+
+        int updated = userRepository.updateUserProfile(
+                userId,
+                firstName,
+                lastName,
+                email,
+                phone,
+                LocalDateTime.now(),
+                currentUser.getId()
+        );
+
+        if (updated == 0) {
+            throw new RuntimeException("Failed to update user");
         }
 
-        user.setUpdatedAt(LocalDateTime.now());
-        user.setUpdatedBy(currentUser.getId());
+        User updatedUser = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Failed to fetch updated user"));
 
-        User savedUser = userRepository.save(user);
-        log.info("User updated: {} by {}", savedUser.getUsername(), currentUser.getUsername());
+        log.info("User updated: {} by {}", updatedUser.getUsername(), currentUser.getUsername());
 
         Tenant tenant = null;
-        if (savedUser.getTenantId() != null) {
-            tenant = tenantRepository.findById(savedUser.getTenantId()).orElse(null);
+        if (updatedUser.getTenantId() != null) {
+            tenant = tenantRepository.findById(updatedUser.getTenantId()).orElse(null);
         }
 
-        return convertToUserResponse(savedUser, tenant);
+        return convertToUserResponse(updatedUser, tenant);
     }
 
     @Transactional
     public void deleteUser(Long userId, UserPrincipal currentUser) {
-        // Only super admins can delete users
         if (currentUser.getUserType() != User.UserType.SUPER_ADMIN) {
             throw new AccessDeniedException("Only super admins can delete users");
         }
@@ -181,22 +223,32 @@ public class UserManagementService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        // Prevent self-deletion
         if (user.getId().equals(currentUser.getId())) {
             throw new IllegalArgumentException("Cannot delete your own account");
         }
 
-        userRepository.delete(user);
+        // Soft delete by setting is_active to false
+        int updated = userRepository.updateUserActiveStatus(
+                userId,
+                false,
+                LocalDateTime.now(),
+                currentUser.getId()
+        );
+
+        if (updated == 0) {
+            throw new RuntimeException("Failed to delete user");
+        }
+
         log.info("User deleted: {} by {}", user.getUsername(), currentUser.getUsername());
     }
 
     public Page<UserResponse> searchUsers(UserSearchRequest request, UserPrincipal currentUser) {
-        // Apply tenant filtering based on the current user
         if (currentUser.getUserType() != User.UserType.SUPER_ADMIN) {
             request.setTenantId(currentUser.getTenantId());
         }
 
-        Sort sort = Sort.by(Sort.Direction.fromString(request.getSortDirection()), request.getSortBy());
+        String sortBy = mapSortField(request.getSortBy());
+        Sort sort = Sort.by(Sort.Direction.fromString(request.getSortDirection()), sortBy);
         Pageable pageable = PageRequest.of(request.getPage(), request.getSize(), sort);
 
         Page<User> users = userRepository.findUsersWithFilters(
@@ -204,7 +256,7 @@ public class UserManagementService {
                 request.getEmail(),
                 request.getFirstName(),
                 request.getLastName(),
-                String.valueOf(request.getUserType()),
+                request.getUserType() != null ? request.getUserType().name() : null,
                 request.getTenantId(),
                 request.getIsActive(),
                 pageable
@@ -233,19 +285,30 @@ public class UserManagementService {
         return convertToUserResponse(user, tenant);
     }
 
+    private String mapSortField(String fieldName) {
+        return switch (fieldName) {
+            case "createdAt" -> "created_at";
+            case "updatedAt" -> "updated_at";
+            case "firstName" -> "first_name";
+            case "lastName" -> "last_name";
+            case "userType" -> "user_type";
+            case "tenantId" -> "tenant_id";
+            case "isActive" -> "is_active";
+            case "lastLogin" -> "last_login";
+            default -> fieldName;
+        };
+    }
+
     private void validateCreateUserPermission(CreateUserRequest request, UserPrincipal currentUser) {
         if (currentUser.getUserType() == User.UserType.SUPER_ADMIN) {
-            // Super admin can create any type of user
             return;
         }
 
         if (currentUser.getUserType() == User.UserType.TENANT_ADMIN) {
-            // Tenant admin can only create users in their own tenant
             if (request.getUserType() == User.UserType.SUPER_ADMIN) {
                 throw new AccessDeniedException("Tenant admin cannot create super admin users");
             }
 
-            // If a tenant is specified, it must match the current user's tenant
             if (request.getTenantId() != null && !request.getTenantId().equals(currentUser.getTenantId())) {
                 throw new AccessDeniedException("Cannot create user for different tenant");
             }
@@ -258,7 +321,6 @@ public class UserManagementService {
 
     private Long determineTargetTenant(CreateUserRequest request, UserPrincipal currentUser) {
         if (currentUser.getUserType() == User.UserType.SUPER_ADMIN) {
-            // Super admin can specify tenant explicitly
             if (request.getTenantId() != null) {
                 return request.getTenantId();
             }
@@ -269,7 +331,6 @@ public class UserManagementService {
                 return tenant.getId();
             }
 
-            // For super admin users, no tenant
             if (request.getUserType() == User.UserType.SUPER_ADMIN) {
                 return null;
             }
@@ -277,22 +338,19 @@ public class UserManagementService {
             throw new IllegalArgumentException("Tenant must be specified for non-super-admin users");
         }
 
-        // Tenant admin creates users in their own tenant
         return currentUser.getTenantId();
     }
 
     private void validateUpdatePermission(User user, UserPrincipal currentUser) {
         if (currentUser.getUserType() == User.UserType.SUPER_ADMIN) {
-            return; // Super admin can update anyone
+            return;
         }
 
         if (currentUser.getUserType() == User.UserType.TENANT_ADMIN) {
-            // Tenant admin can only update users in their tenant
             if (!currentUser.getTenantId().equals(user.getTenantId())) {
                 throw new AccessDeniedException("Cannot update user from different tenant");
             }
 
-            // Cannot update super admin
             if (user.getUserType() == User.UserType.SUPER_ADMIN) {
                 throw new AccessDeniedException("Cannot update super admin user");
             }
@@ -305,18 +363,16 @@ public class UserManagementService {
 
     private void validateReadPermission(User user, UserPrincipal currentUser) {
         if (currentUser.getUserType() == User.UserType.SUPER_ADMIN) {
-            return; // Super admin can read anyone
+            return;
         }
 
         if (currentUser.getUserType() == User.UserType.TENANT_ADMIN) {
-            // Tenant admin can read users in their tenant
             if (!currentUser.getTenantId().equals(user.getTenantId())) {
                 throw new AccessDeniedException("Cannot view user from different tenant");
             }
             return;
         }
 
-        // Regular users can only view themselves
         if (!user.getId().equals(currentUser.getId())) {
             throw new AccessDeniedException("Cannot view other users");
         }
@@ -360,4 +416,5 @@ public class UserManagementService {
                 .accountLockedUntil(user.getAccountLockedUntil())
                 .build();
     }
+
 }
