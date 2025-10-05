@@ -114,4 +114,51 @@ public interface UserRepository extends JpaRepository<User, Long> {
                                   @Param("lockedUntil") LocalDateTime lockedUntil, @Param("updatedAt") LocalDateTime updatedAt,
                                   @Param("updatedBy") Long updatedBy);
 
+    @Modifying
+    @Transactional
+    @Query(value = """
+            INSERT INTO erp_master.users 
+            (username, email, password_hash, first_name, last_name, phone, 
+             user_type, tenant_id, password_change_required, failed_login_attempts,
+             is_active, created_at, created_by, updated_at, updated_by)
+            VALUES (:username, :email, :passwordHash, :firstName, :lastName, :phone,
+                    :userType, :tenantId, :passwordChangeRequired, :failedLoginAttempts,
+                    :isActive, :createdAt, :createdBy, :updatedAt, :updatedBy)
+            """, nativeQuery = true)
+    int insertUser(@Param("username") String username, @Param("email") String email,
+                   @Param("passwordHash") String passwordHash, @Param("firstName") String firstName,
+                   @Param("lastName") String lastName, @Param("phone") String phone,
+                   @Param("userType") String userType, @Param("tenantId") Long tenantId,
+                   @Param("passwordChangeRequired") Boolean passwordChangeRequired, @Param("failedLoginAttempts") Integer failedLoginAttempts,
+                   @Param("isActive") Boolean isActive, @Param("createdAt") LocalDateTime createdAt,
+                   @Param("createdBy") Long createdBy, @Param("updatedAt") LocalDateTime updatedAt,
+                   @Param("updatedBy") Long updatedBy);
+
+    @Query(value = "SELECT LAST_INSERT_ID()", nativeQuery = true)
+    Long getLastInsertId();
+
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE erp_master.users 
+            SET is_active = :isActive,
+                updated_at = :updatedAt,
+                updated_by = :updatedBy
+            WHERE id = :userId
+            """, nativeQuery = true)
+    int updateUserActiveStatus(@Param("userId") Long userId, @Param("isActive") Boolean isActive,
+                               @Param("updatedAt") LocalDateTime updatedAt, @Param("updatedBy") Long updatedBy);
+
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE erp_master.users 
+            SET is_active = :isActive,
+                updated_at = :updatedAt,
+                updated_by = :updatedBy
+            WHERE tenant_id = :tenantId
+            """, nativeQuery = true)
+    int updateAllUsersByTenantId(@Param("tenantId") Long tenantId, @Param("isActive") Boolean isActive,
+                                 @Param("updatedAt") LocalDateTime updatedAt, @Param("updatedBy") Long updatedBy);
+
 }

@@ -14,6 +14,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/admin/tenants")
 @RequiredArgsConstructor
@@ -39,37 +41,39 @@ public class TenantController {
         }
     }
 
-    @GetMapping
-    public ResponseEntity<ApiResponse<Page<TenantResponse>>> searchTenants(@RequestParam(required = false) String tenantName,
-                                                                           @RequestParam(required = false) String tenantCode,
-                                                                           @RequestParam(required = false) String contactEmail,
-                                                                           @RequestParam(required = false) String status,
-                                                                           @RequestParam(required = false) Boolean isActive,
-                                                                           @RequestParam(defaultValue = "0") int page,
-                                                                           @RequestParam(defaultValue = "20") int size,
-                                                                           @RequestParam(defaultValue = "createdAt") String sortBy,
-                                                                           @RequestParam(defaultValue = "DESC") String sortDirection) {
+    @PostMapping("/search")
+    public ResponseEntity<ApiResponse<Page<TenantResponse>>> searchTenants(
+            @RequestBody TenantSearchRequest searchRequest) {
 
         try {
-            TenantSearchRequest searchRequest = new TenantSearchRequest();
-            searchRequest.setTenantName(tenantName);
-            searchRequest.setTenantCode(tenantCode);
-            searchRequest.setContactEmail(contactEmail);
-            if (status != null) {
-                searchRequest.setStatus(com.erp.common.entity.Tenant.TenantStatus.valueOf(status));
-            }
-            searchRequest.setIsActive(isActive);
-            searchRequest.setPage(page);
-            searchRequest.setSize(size);
-            searchRequest.setSortBy(sortBy);
-            searchRequest.setSortDirection(sortDirection);
-
             Page<TenantResponse> tenants = tenantManagementService.searchTenants(searchRequest);
             return ResponseEntity.ok(ApiResponse.success("Tenants retrieved successfully", tenants));
         } catch (Exception e) {
             log.error("Failed to search tenants: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error(e.getMessage(), "TENANT_SEARCH_FAILED"));
+        }
+    }
+
+    // Keep the GET endpoint for simple listing without filters
+    @GetMapping
+    public ResponseEntity<ApiResponse<Page<TenantResponse>>> getTenantsSimple(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        try {
+            TenantSearchRequest searchRequest = new TenantSearchRequest();
+            searchRequest.setPage(page);
+            searchRequest.setSize(size);
+            searchRequest.setSortBy("created_at"); // Use snake_case directly
+            searchRequest.setSortDirection("DESC");
+
+            Page<TenantResponse> tenants = tenantManagementService.searchTenants(searchRequest);
+            return ResponseEntity.ok(ApiResponse.success("Tenants retrieved successfully", tenants));
+        } catch (Exception e) {
+            log.error("Failed to get tenants: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(e.getMessage(), "TENANT_RETRIEVAL_FAILED"));
         }
     }
 
@@ -128,6 +132,18 @@ public class TenantController {
             log.error("Failed to delete tenant: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error(e.getMessage(), "TENANT_DELETION_FAILED"));
+        }
+    }
+
+    @GetMapping("/list")
+    public ResponseEntity<ApiResponse<List<TenantResponse>>> getAllActiveTenants() {
+        try {
+            List<TenantResponse> tenants = tenantManagementService.getAllActiveTenants();
+            return ResponseEntity.ok(ApiResponse.success("Active tenants retrieved successfully", tenants));
+        } catch (Exception e) {
+            log.error("Failed to list tenants: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(e.getMessage(), "TENANT_LIST_FAILED"));
         }
     }
 

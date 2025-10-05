@@ -168,8 +168,7 @@ public class AuthenticationService {
         }
 
         // Use native query to update failed login attempts
-        int updated = userRepository.updateFailedLoginAttempts(
-                user.getId(),
+        int updated = userRepository.updateFailedLoginAttempts(user.getId(),
                 attempts,
                 lockedUntil,
                 LocalDateTime.now(),

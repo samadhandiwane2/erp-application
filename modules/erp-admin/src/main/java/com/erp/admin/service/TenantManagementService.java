@@ -11,7 +11,6 @@ import com.erp.common.entity.User;
 import com.erp.common.jwt.UserPrincipal;
 import com.erp.common.repository.TenantRepository;
 import com.erp.common.service.DatabaseInitializationService;
-import com.erp.common.service.FlywayMigrationService;
 import com.erp.security.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,11 +19,14 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.sql.DataSource;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -36,11 +38,11 @@ public class TenantManagementService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final SchemaManagementService schemaManagementService;
-    private final FlywayMigrationService flywayMigrationService;
     private final MultiTenantDataSourceConfig dataSourceConfig;
     private final TenantDataSeederService tenantDataSeederService;
     private final DatabaseInitializationService databaseInitializationService;
 
+    @Transactional
     public TenantResponse createTenant(CreateTenantRequest request, UserPrincipal currentUser) {
 
         // Validate tenant code uniqueness
@@ -57,30 +59,45 @@ public class TenantManagementService {
         }
 
         String schemaName = null;
+        Long tenantId = null;
+
         try {
             // Generate schema name
             schemaName = generateSchemaName(request.getTenantCode());
 
-            // Step 1: Create tenant entity in master database
-            Tenant tenant = new Tenant();
-            tenant.setTenantName(request.getTenantName());
-            tenant.setTenantCode(request.getTenantCode());
-            tenant.setSchemaName(schemaName);
-            tenant.setContactEmail(request.getContactEmail());
-            tenant.setContactPhone(request.getContactPhone());
-            tenant.setStatus(Tenant.TenantStatus.ACTIVE);
-            tenant.setSubscriptionStartDate(LocalDateTime.now());
-            tenant.setSubscriptionEndDate(LocalDateTime.now().plusMonths(request.getSubscriptionMonths()));
-            tenant.setIsActive(true);
-            tenant.setCreatedBy(currentUser.getId());
-            tenant.setCreatedAt(LocalDateTime.now());
+            // Step 1: Insert tenant using native query
+            LocalDateTime now = LocalDateTime.now();
+            int inserted = tenantRepository.insertTenant(
+                    request.getTenantName(),
+                    request.getTenantCode(),
+                    schemaName,
+                    null, // databaseUrl
+                    request.getContactEmail(),
+                    request.getContactPhone(),
+                    Tenant.TenantStatus.ACTIVE.name(),
+                    now, // subscriptionStartDate
+                    now.plusMonths(request.getSubscriptionMonths()), // subscriptionEndDate
+                    true, // isActive
+                    now, // createdAt
+                    currentUser.getId(), // createdBy
+                    now, // updatedAt
+                    currentUser.getId() // updatedBy
+            );
 
-            Tenant savedTenant = tenantRepository.save(tenant);
-            log.info("Step 1: Created tenant record: {} with ID: {}", savedTenant.getTenantCode(), savedTenant.getId());
+            if (inserted == 0) {
+                throw new RuntimeException("Failed to insert tenant");
+            }
 
-            // Step 2: Create database schema and run migrations using DatabaseInitializationService
-            // This replaces the manual schema creation and migration calls
-            databaseInitializationService.initializeNewTenantSchema(tenant.getTenantCode());
+            // Get the inserted tenant ID
+            tenantId = tenantRepository.getLastInsertId();
+            log.info("Step 1: Created tenant record: {} with ID: {}", request.getTenantCode(), tenantId);
+
+            // Fetch the created tenant for response
+            Tenant savedTenant = tenantRepository.findById(tenantId)
+                    .orElseThrow(() -> new RuntimeException("Failed to fetch created tenant"));
+
+            // Step 2: Create database schema and run migrations
+            databaseInitializationService.initializeNewTenantSchema(savedTenant.getTenantCode());
             log.info("Step 2: Created and migrated database schema: {}", schemaName);
 
             // Step 3: Add datasource for the new tenant
@@ -91,7 +108,7 @@ public class TenantManagementService {
             DataSource tenantDataSource = dataSourceConfig.getTenantDataSource(schemaName);
             log.info("Step 4: Retrieved tenant datasource for schema: {}", schemaName);
 
-            // Step 5: Verify tables exist before seeding (optional)
+            // Step 5: Verify tables exist before seeding
             if (verifyTablesExist(tenantDataSource)) {
                 // Step 6: Seed initial data
                 tenantDataSeederService.seedInitialData(tenantDataSource, schemaName);
@@ -102,7 +119,11 @@ public class TenantManagementService {
 
             // Step 7: Create tenant admin user
             String tempPassword = generateTemporaryPassword();
-            User tenantAdmin = createTenantAdmin(request, savedTenant, currentUser, tempPassword);
+            Long adminUserId = createTenantAdmin(request, savedTenant, currentUser, tempPassword);
+
+            User tenantAdmin = userRepository.findById(adminUserId)
+                    .orElseThrow(() -> new RuntimeException("Failed to fetch created admin user"));
+
             log.info("Step 6: Created tenant admin: {} with temporary password", tenantAdmin.getUsername());
 
             // Log the temporary password (in production, send via email)
@@ -143,10 +164,7 @@ public class TenantManagementService {
         }
     }
 
-    /**
-     * NEW METHOD: Update existing tenant schema to latest migrations
-     * Use this when you add V4, V5, etc. migration files
-     */
+    @Transactional
     public void updateTenantSchema(String tenantCode) {
         try {
             log.info("Updating tenant schema for tenant: {}", tenantCode);
@@ -166,10 +184,6 @@ public class TenantManagementService {
         }
     }
 
-    /**
-     * NEW METHOD: Migrate all existing tenants to latest schema version
-     * Use this when you want to apply new migrations to all tenants at once
-     */
     public void migrateAllTenantsToLatest() {
         try {
             log.info("Starting migration of all tenant schemas to latest version");
@@ -182,9 +196,6 @@ public class TenantManagementService {
         }
     }
 
-    /**
-     * NEW METHOD: Get database initialization status
-     */
     public DatabaseInitializationService.DatabaseInitializationStatus getDatabaseStatus() {
         return databaseInitializationService.getInitializationStatus();
     }
@@ -193,7 +204,6 @@ public class TenantManagementService {
         try (var connection = dataSource.getConnection();
              var statement = connection.createStatement()) {
 
-            // Check if a critical table exists
             var resultSet = statement.executeQuery(
                     "SELECT COUNT(*) FROM information_schema.tables " +
                             "WHERE table_schema = DATABASE() " +
@@ -211,76 +221,91 @@ public class TenantManagementService {
         }
     }
 
+    @Transactional
     public TenantResponse updateTenant(Long tenantId, UpdateTenantRequest request, UserPrincipal currentUser) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new RuntimeException("Tenant not found: " + tenantId));
 
-        // Update fields
-        if (request.getTenantName() != null) {
-            tenant.setTenantName(request.getTenantName());
-        }
-        if (request.getContactEmail() != null) {
-            tenant.setContactEmail(request.getContactEmail());
-        }
-        if (request.getContactPhone() != null) {
-            tenant.setContactPhone(request.getContactPhone());
-        }
-        if (request.getStatus() != null) {
-            tenant.setStatus(request.getStatus());
-        }
-        if (request.getSubscriptionEndDate() != null) {
-            tenant.setSubscriptionEndDate(request.getSubscriptionEndDate());
+        // Build update parameters with current or new values
+        String tenantName = request.getTenantName() != null ? request.getTenantName() : tenant.getTenantName();
+        String contactEmail = request.getContactEmail() != null ? request.getContactEmail() : tenant.getContactEmail();
+        String contactPhone = request.getContactPhone() != null ? request.getContactPhone() : tenant.getContactPhone();
+        String status = request.getStatus() != null ? request.getStatus().name() : tenant.getStatus().name();
+        LocalDateTime subscriptionEndDate = request.getSubscriptionEndDate() != null ?
+                request.getSubscriptionEndDate() : tenant.getSubscriptionEndDate();
+
+        int updated = tenantRepository.updateTenant(
+                tenantId,
+                tenantName,
+                contactEmail,
+                contactPhone,
+                status,
+                subscriptionEndDate,
+                LocalDateTime.now(),
+                currentUser.getId()
+        );
+
+        if (updated == 0) {
+            throw new RuntimeException("Failed to update tenant");
         }
 
-        tenant.setUpdatedBy(currentUser.getId());
-        tenant.setUpdatedAt(LocalDateTime.now());
-
-        Tenant updatedTenant = tenantRepository.save(tenant);
+        Tenant updatedTenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new RuntimeException("Failed to fetch updated tenant"));
 
         return convertToResponse(updatedTenant);
     }
 
+    @Transactional
     public void suspendTenant(Long tenantId, UserPrincipal currentUser) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new RuntimeException("Tenant not found: " + tenantId));
 
-        tenant.setStatus(Tenant.TenantStatus.SUSPENDED);
-        tenant.setUpdatedBy(currentUser.getId());
-        tenant.setUpdatedAt(LocalDateTime.now());
+        int updated = tenantRepository.updateTenantStatus(
+                tenantId,
+                Tenant.TenantStatus.SUSPENDED.name(),
+                LocalDateTime.now(),
+                currentUser.getId()
+        );
 
-        tenantRepository.save(tenant);
+        if (updated == 0) {
+            throw new RuntimeException("Failed to suspend tenant");
+        }
 
-        // Optionally disable all tenant users
-        userRepository.findByTenantIdAndIsActiveTrue(tenantId)
-                .forEach(user -> {
-                    user.setIsActive(false);
-                    user.setUpdatedBy(currentUser.getId());
-                    user.setUpdatedAt(LocalDateTime.now());
-                    userRepository.save(user);
-                });
+        // Disable all tenant users
+        userRepository.updateAllUsersByTenantId(
+                tenantId,
+                false,
+                LocalDateTime.now(),
+                currentUser.getId()
+        );
     }
 
+    @Transactional
     public void deleteTenant(Long tenantId, UserPrincipal currentUser) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new RuntimeException("Tenant not found: " + tenantId));
 
         try {
             // Soft delete tenant
-            tenant.setIsActive(false);
-            tenant.setStatus(Tenant.TenantStatus.INACTIVE);
-            tenant.setUpdatedBy(currentUser.getId());
-            tenant.setUpdatedAt(LocalDateTime.now());
+            int updated = tenantRepository.softDeleteTenant(
+                    tenantId,
+                    false,
+                    Tenant.TenantStatus.INACTIVE.name(),
+                    LocalDateTime.now(),
+                    currentUser.getId()
+            );
 
-            tenantRepository.save(tenant);
+            if (updated == 0) {
+                throw new RuntimeException("Failed to delete tenant");
+            }
 
             // Disable all tenant users
-            userRepository.findByTenantIdAndIsActiveTrue(tenantId)
-                    .forEach(user -> {
-                        user.setIsActive(false);
-                        user.setUpdatedBy(currentUser.getId());
-                        user.setUpdatedAt(LocalDateTime.now());
-                        userRepository.save(user);
-                    });
+            userRepository.updateAllUsersByTenantId(
+                    tenantId,
+                    false,
+                    LocalDateTime.now(),
+                    currentUser.getId()
+            );
 
             // Remove datasource
             dataSourceConfig.removeTenantDataSource(tenant.getTenantCode());
@@ -301,19 +326,21 @@ public class TenantManagementService {
     }
 
     public Page<TenantResponse> searchTenants(TenantSearchRequest request) {
+        // Map camelCase to snake_case for database columns
+        String sortBy = mapSortField(request.getSortBy());
+
         Sort sort = Sort.by(
                 "ASC".equalsIgnoreCase(request.getSortDirection()) ?
                         Sort.Direction.ASC : Sort.Direction.DESC,
-                request.getSortBy()
+                sortBy
         );
-
         PageRequest pageRequest = PageRequest.of(request.getPage(), request.getSize(), sort);
 
         Page<Tenant> tenants = tenantRepository.findTenantsWithFilters(
                 request.getTenantName(),
                 request.getTenantCode(),
                 request.getContactEmail(),
-                request.getStatus().name(),
+                request.getStatus() != null ? request.getStatus().name() : null,
                 request.getIsActive(),
                 request.getSubscriptionStartAfter(),
                 request.getSubscriptionEndBefore(),
@@ -323,26 +350,51 @@ public class TenantManagementService {
         return tenants.map(this::convertToResponse);
     }
 
+    private String mapSortField(String fieldName) {
+        return switch (fieldName) {
+            case "createdAt" -> "created_at";
+            case "updatedAt" -> "updated_at";
+            case "tenantName" -> "tenant_name";
+            case "tenantCode" -> "tenant_code";
+            case "contactEmail" -> "contact_email";
+            case "contactPhone" -> "contact_phone";
+            case "subscriptionStartDate" -> "subscription_start_date";
+            case "subscriptionEndDate" -> "subscription_end_date";
+            case "isActive" -> "is_active";
+            default -> fieldName;
+        };
+    }
+
     private String generateSchemaName(String tenantCode) {
         return "tenant_" + tenantCode.toLowerCase();
     }
 
-    private User createTenantAdmin(CreateTenantRequest request, Tenant tenant, UserPrincipal currentUser, String tempPassword) {
-        User tenantAdmin = new User();
-        tenantAdmin.setUsername(request.getAdminUsername());
-        tenantAdmin.setEmail(request.getAdminEmail());
-        tenantAdmin.setPasswordHash(passwordEncoder.encode(tempPassword));
-        tenantAdmin.setFirstName(request.getAdminFirstName());
-        tenantAdmin.setLastName(request.getAdminLastName());
-        tenantAdmin.setPhone(request.getAdminPhone());
-        tenantAdmin.setUserType(User.UserType.TENANT_ADMIN);
-        tenantAdmin.setTenantId(tenant.getId());
-        tenantAdmin.setPasswordChangeRequired(true);
-        tenantAdmin.setIsActive(true);
-        tenantAdmin.setCreatedBy(currentUser.getId());
-        tenantAdmin.setCreatedAt(LocalDateTime.now());
+    private Long createTenantAdmin(CreateTenantRequest request, Tenant tenant, UserPrincipal currentUser, String tempPassword) {
+        LocalDateTime now = LocalDateTime.now();
 
-        return userRepository.save(tenantAdmin);
+        int inserted = userRepository.insertUser(
+                request.getAdminUsername(),
+                request.getAdminEmail(),
+                passwordEncoder.encode(tempPassword),
+                request.getAdminFirstName(),
+                request.getAdminLastName(),
+                request.getAdminPhone(),
+                User.UserType.TENANT_ADMIN.name(),
+                tenant.getId(),
+                true, // passwordChangeRequired
+                0, // failedLoginAttempts
+                true, // isActive
+                now, // createdAt
+                currentUser.getId(), // createdBy
+                now, // updatedAt
+                currentUser.getId() // updatedBy
+        );
+
+        if (inserted == 0) {
+            throw new RuntimeException("Failed to create tenant admin user");
+        }
+
+        return userRepository.getLastInsertId();
     }
 
     private String generateTemporaryPassword() {
@@ -364,7 +416,6 @@ public class TenantManagementService {
         response.setUpdatedAt(tenant.getUpdatedAt());
         response.setIsActive(tenant.getIsActive());
 
-        // Use findFirst or handle multiple admins
         Optional<User> tenantAdmin = userRepository.findFirstByTenantIdAndUserTypeAndIsActiveTrueOrderByCreatedAtDesc(
                 tenant.getId(), User.UserType.TENANT_ADMIN.name()
         );
@@ -383,6 +434,13 @@ public class TenantManagementService {
         adminInfo.setPhone(user.getPhone());
         adminInfo.setLastLogin(user.getLastLogin());
         return adminInfo;
+    }
+
+    public List<TenantResponse> getAllActiveTenants() {
+        List<Tenant> tenants = tenantRepository.findByIsActiveTrueOrderByCreatedAtDesc();
+        return tenants.stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
     }
 
 }
