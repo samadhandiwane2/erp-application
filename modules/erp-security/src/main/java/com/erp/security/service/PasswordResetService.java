@@ -42,35 +42,35 @@ public class PasswordResetService {
     private static final SecureRandom secureRandom = new SecureRandom();
 
     @Transactional
-    public void requestPasswordReset(ForgotPasswordRequest request) {
-        String email = request.getEmail().toLowerCase().trim();
+    public void requestPasswordReset(ForgotPasswordRequest forgotPasswordRequest) {
+        String email = forgotPasswordRequest.getEmail().toLowerCase().trim();
 
-        // Check rate limiting
         checkRateLimit(email);
 
-        // Find a user by email (return same response whether user exists or not for security)
         Optional<User> userOpt = userRepository.findByEmailAndIsActiveTrue(email);
 
         if (userOpt.isPresent()) {
             User user = userOpt.get();
 
-            // Invalidate any existing reset codes for this user
             resetTokenRepository.markAllAsUsedByEmail(email);
 
-            // Generate new reset code
             String resetCode = generateResetCode();
+            LocalDateTime now = LocalDateTime.now();
 
-            // Create reset token
-            PasswordResetToken resetToken = new PasswordResetToken();
-            resetToken.setUserId(user.getId());
-            resetToken.setEmail(email);
-            resetToken.setResetCode(resetCode);
-            resetToken.setExpiresAt(LocalDateTime.now().plusMinutes(resetCodeExpiryMinutes));
-            resetToken.setIpAddress(getClientIpAddress());
+            int inserted = resetTokenRepository.insertResetToken(
+                    user.getId(),
+                    email,
+                    resetCode,
+                    now.plusMinutes(resetCodeExpiryMinutes),
+                    false,
+                    now,
+                    getClientIpAddress()
+            );
 
-            resetTokenRepository.save(resetToken);
+            if (inserted == 0) {
+                throw new RuntimeException("Failed to create password reset token");
+            }
 
-            // Send email
             emailService.sendPasswordResetEmail(email, user.getFirstName(), resetCode);
 
             log.info("Password reset requested for user: {} from IP: {}", email, getClientIpAddress());
@@ -78,14 +78,12 @@ public class PasswordResetService {
             log.warn("Password reset requested for non-existent email: {} from IP: {}",
                     email, getClientIpAddress());
         }
-
-        // Always return a success response (don't reveal if email exists)
     }
 
     @Transactional(readOnly = true)
-    public void verifyResetCode(VerifyResetCodeRequest request) {
-        String email = request.getEmail().toLowerCase().trim();
-        String code = request.getCode().trim();
+    public void verifyResetCode(VerifyResetCodeRequest verifyRequest) {
+        String email = verifyRequest.getEmail().toLowerCase().trim();
+        String code = verifyRequest.getCode().trim();
 
         Optional<PasswordResetToken> tokenOpt = resetTokenRepository
                 .findByEmailAndResetCodeAndIsUsedFalseAndExpiresAtAfter(email, code, LocalDateTime.now());
@@ -100,18 +98,16 @@ public class PasswordResetService {
     }
 
     @Transactional
-    public void resetPassword(ResetPasswordRequest request) {
-        String email = request.getEmail().toLowerCase().trim();
-        String code = request.getCode().trim();
-        String newPassword = request.getNewPassword();
-        String confirmPassword = request.getConfirmPassword();
+    public void resetPassword(ResetPasswordRequest resetRequest) {
+        String email = resetRequest.getEmail().toLowerCase().trim();
+        String code = resetRequest.getCode().trim();
+        String newPassword = resetRequest.getNewPassword();
+        String confirmPassword = resetRequest.getConfirmPassword();
 
-        // Validate password confirmation
         if (!newPassword.equals(confirmPassword)) {
             throw new AuthenticationException("Passwords do not match");
         }
 
-        // Find valid reset token
         Optional<PasswordResetToken> tokenOpt = resetTokenRepository
                 .findByEmailAndResetCodeAndIsUsedFalseAndExpiresAtAfter(email, code, LocalDateTime.now());
 
@@ -123,7 +119,6 @@ public class PasswordResetService {
 
         PasswordResetToken resetToken = tokenOpt.get();
 
-        // Find and update user
         Optional<User> userOpt = userRepository.findById(resetToken.getUserId());
         if (userOpt.isEmpty()) {
             throw new AuthenticationException("User not found");
@@ -131,25 +126,32 @@ public class PasswordResetService {
 
         User user = userOpt.get();
 
-        // Update password
-        user.setPasswordHash(passwordEncoder.encode(newPassword));
-        user.setUpdatedAt(LocalDateTime.now());
+        int updated = userRepository.updateUserPassword(
+                user.getId(),
+                passwordEncoder.encode(newPassword),
+                null,
+                0,
+                LocalDateTime.now(),
+                user.getId()
+        );
 
-        // Clear account lockout if exists
-        user.setAccountLockedUntil(null);
-        user.setFailedLoginAttempts(0);
+        if (updated == 0) {
+            throw new RuntimeException("Failed to update password");
+        }
 
-        userRepository.save(user);
+        LocalDateTime now = LocalDateTime.now();
+        int tokenUpdated = resetTokenRepository.updateResetTokenUsed(
+                resetToken.getId(),
+                true,
+                now
+        );
 
-        // Mark the reset token as used
-        resetToken.setIsUsed(true);
-        resetToken.setUsedAt(LocalDateTime.now());
-        resetTokenRepository.save(resetToken);
+        if (tokenUpdated == 0) {
+            throw new RuntimeException("Failed to update reset token");
+        }
 
-        // Invalidate any other reset codes for this user
         resetTokenRepository.markAllAsUsedByEmail(email);
 
-        // Send success email
         emailService.sendPasswordResetSuccessEmail(email, user.getFirstName());
 
         log.info("Password reset successfully completed for user: {} from IP: {}",
@@ -169,7 +171,6 @@ public class PasswordResetService {
     }
 
     private String generateResetCode() {
-        // Generate 6-digit number
         int code = 100000 + secureRandom.nextInt(900000);
         return String.valueOf(code);
     }
@@ -188,7 +189,6 @@ public class PasswordResetService {
         return request.getRemoteAddr();
     }
 
-    // Cleanup job method (to be called by a scheduled task)
     @Transactional
     public void cleanupExpiredTokens() {
         int deletedCount = resetTokenRepository.deleteExpiredTokens(LocalDateTime.now());

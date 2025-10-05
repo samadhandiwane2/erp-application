@@ -34,7 +34,7 @@ public class UserSettingsService {
             "Asia/Shanghai", "Asia/Kolkata", "Australia/Sydney", "Pacific/Auckland"
     );
 
-    @Transactional(readOnly = true)
+    @Transactional
     public UserSettingsResponse getUserSettings(UserPrincipal currentUser) {
         User user = userRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new AuthenticationException("User not found"));
