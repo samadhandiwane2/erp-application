@@ -5,7 +5,7 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 # Copy the Spring Boot fat jar built by Maven
-COPY target/*.jar app.jar
+COPY modules/erp-app/target/*.jar app.jar
 
 # Expose application port
 EXPOSE 8080
