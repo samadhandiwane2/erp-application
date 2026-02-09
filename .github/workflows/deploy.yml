@@ -42,12 +42,11 @@ jobs:
 
       - name: Deploy to Kubernetes (EC2)
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          IMAGE: ${{ env.IMAGE }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: IMAGE
           script: |
             cd erp-application
             echo "Deploying image: $IMAGE"
