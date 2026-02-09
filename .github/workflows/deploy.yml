@@ -47,6 +47,7 @@ jobs:
                   username: ${{ secrets.EC2_USER }}
                   key: ${{ secrets.EC2_SSH_KEY }}
                   script: |
+                      cd erp-application
                       sed "s|IMAGE_PLACEHOLDER|$IMAGE|g" k8s/deployment.yaml > deploy.yaml
                       kubectl apply -f deploy.yaml
                       kubectl apply -f k8s/service.yaml
