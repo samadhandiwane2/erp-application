@@ -1,0 +1,52 @@
+name: CI-CD Spring Boot Java 21
+
+on:
+    push:
+        branches: [ master ]
+
+jobs:
+    build-deploy:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Java 21
+              uses: actions/setup-java@v4
+              with:
+                  distribution: 'temurin'
+                  java-version: '21'
+
+            - name: Build JAR
+              run: mvn clean package -DskipTests
+
+            - name: Configure AWS
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                  aws-region: ${{ secrets.AWS_REGION }}
+
+            - name: Login to ECR
+              run: |
+                  aws ecr get-login-password --region $AWS_REGION |
+                  docker login --username AWS --password-stdin ${{ secrets.ECR_REPO }}
+
+            - name: Build & Push Docker Image
+              run: |
+                  IMAGE=${{ secrets.ECR_REPO }}:${{ github.sha }}
+                  docker build -t $IMAGE .
+                  docker push $IMAGE
+                  echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+            - name: Deploy to Kubernetes (EC2)
+              uses: appleboy/ssh-action@v1.0.3
+              with:
+                  host: ${{ secrets.EC2_HOST }}
+                  username: ${{ secrets.EC2_USER }}
+                  key: ${{ secrets.EC2_SSH_KEY }}
+                  script: |
+                      sed "s|IMAGE_PLACEHOLDER|$IMAGE|g" k8s/deployment.yaml > deploy.yaml
+                      kubectl apply -f deploy.yaml
+                      kubectl apply -f k8s/service.yaml

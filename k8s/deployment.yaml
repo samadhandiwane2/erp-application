@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: springboot
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: springboot
+    template:
+        metadata:
+            labels:
+                app: springboot
+        spec:
+            containers:
+                - name: app
+                  image: IMAGE_PLACEHOLDER
+                  ports:
+                      - containerPort: 8080
+                  envFrom:
+                      - configMapRef:
+                            name: db-config
+                      - secretRef:
+                            name: db-secret
