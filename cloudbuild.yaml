@@ -1,0 +1,28 @@
+#This file is being used to trigger build form GCP
+steps:
+
+    # Step 1 — Build Maven project
+    - name: maven:3.9.9-eclipse-temurin-21
+      entrypoint: mvn
+      args: ["-B", "clean", "package", "-DskipTests"]
+
+    # Step 2 — Build Docker image
+    - name: gcr.io/cloud-builders/docker
+      args:
+        [
+            "build",
+            "-t",
+            "us-central1-docker.pkg.dev/erp-learning-project/erp-repo/erp-app:$SHORT_SHA",
+            "."
+        ]
+
+    # Step 3 — Push image to Artifact Registry
+    - name: gcr.io/cloud-builders/docker
+      args:
+        [
+            "push",
+            "us-central1-docker.pkg.dev/erp-learning-project/erp-repo/erp-app:$SHORT_SHA"
+        ]
+
+images:
+    - us-central1-docker.pkg.dev/erp-learning-project/erp-repo/erp-app:$SHORT_SHA
