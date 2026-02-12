@@ -1,6 +1,5 @@
 #This file is being used to trigger build form GCP
 steps:
-
     # Step 1 — Build Maven project
     - name: maven:3.9.9-eclipse-temurin-21
       entrypoint: mvn
