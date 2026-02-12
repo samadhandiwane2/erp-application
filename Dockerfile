@@ -1,6 +1,5 @@
 # Use lightweight Java 21 runtime
 FROM eclipse-temurin:21-jre
-
 # Set working directory inside container
 WORKDIR /app
 
